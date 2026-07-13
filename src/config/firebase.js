@@ -27,7 +27,6 @@ class FirebaseService {
         logger.warn('⚠️ Firebase credentials missing or not configured. Skipping Firebase initialization.');
         logger.warn('⚠️ To enable Firebase, set FIREBASE_PROJECT_ID, FIREBASE_PRIVATE_KEY, and FIREBASE_CLIENT_EMAIL in .env');
         
-        // نجعل التطبيق يعمل بدون Firebase (مؤقتاً)
         this.initialized = false;
         return;
       }
@@ -38,8 +37,7 @@ class FirebaseService {
           projectId: config.firebase.projectId,
           privateKey: config.firebase.privateKey,
           clientEmail: config.firebase.clientEmail
-        }),
-        databaseURL: config.firebase.databaseURL
+        })
       });
 
       // تهيئة الخدمات
@@ -120,7 +118,6 @@ class FirebaseService {
 
   async createUser(email, password, displayName, additionalData = {}) {
     if (!this.initialized) {
-      logger.warn('⚠️ Firebase not initialized - cannot create user');
       throw new Error('Firebase not initialized');
     }
     
@@ -188,231 +185,6 @@ class FirebaseService {
     }
   }
 
-  async getUserClaims(uid) {
-    if (!this.initialized) {
-      return {};
-    }
-    
-    try {
-      const user = await this.auth.getUser(uid);
-      return user.customClaims || {};
-    } catch (error) {
-      return {};
-    }
-  }
-
-  async generateEmailVerificationLink(email) {
-    if (!this.initialized) {
-      throw new Error('Firebase not initialized');
-    }
-    
-    try {
-      const link = await this.auth.generateEmailVerificationLink(email);
-      return link;
-    } catch (error) {
-      logger.error('❌ Failed to generate verification link:', error.message);
-      throw new Error(`Failed to generate verification link: ${error.message}`);
-    }
-  }
-
-  async generatePasswordResetLink(email) {
-    if (!this.initialized) {
-      throw new Error('Firebase not initialized');
-    }
-    
-    try {
-      const link = await this.auth.generatePasswordResetLink(email);
-      return link;
-    } catch (error) {
-      logger.error('❌ Failed to generate password reset link:', error.message);
-      throw new Error(`Failed to generate password reset link: ${error.message}`);
-    }
-  }
-
-  // ============ FIRESTORE ============
-
-  getFirestore() {
-    if (!this.initialized) {
-      throw new Error('Firebase not initialized');
-    }
-    return this.firestore;
-  }
-
-  async createDocument(collection, data, id = null) {
-    if (!this.initialized) {
-      throw new Error('Firebase not initialized');
-    }
-    
-    try {
-      let docRef;
-      if (id) {
-        docRef = this.firestore.collection(collection).doc(id);
-        await docRef.set(data);
-      } else {
-        docRef = await this.firestore.collection(collection).add(data);
-      }
-      
-      const doc = await docRef.get();
-      return { id: doc.id, ...doc.data() };
-    } catch (error) {
-      logger.error('❌ Failed to create document:', error.message);
-      throw error;
-    }
-  }
-
-  async getDocument(collection, id) {
-    if (!this.initialized) {
-      throw new Error('Firebase not initialized');
-    }
-    
-    try {
-      const doc = await this.firestore.collection(collection).doc(id).get();
-      if (!doc.exists) {
-        return null;
-      }
-      return { id: doc.id, ...doc.data() };
-    } catch (error) {
-      logger.error('❌ Failed to get document:', error.message);
-      throw error;
-    }
-  }
-
-  async updateDocument(collection, id, data) {
-    if (!this.initialized) {
-      throw new Error('Firebase not initialized');
-    }
-    
-    try {
-      await this.firestore.collection(collection).doc(id).update(data);
-      return this.getDocument(collection, id);
-    } catch (error) {
-      logger.error('❌ Failed to update document:', error.message);
-      throw error;
-    }
-  }
-
-  async deleteDocument(collection, id) {
-    if (!this.initialized) {
-      throw new Error('Firebase not initialized');
-    }
-    
-    try {
-      await this.firestore.collection(collection).doc(id).delete();
-      return true;
-    } catch (error) {
-      logger.error('❌ Failed to delete document:', error.message);
-      throw error;
-    }
-  }
-
-  async queryCollection(collection, filters = [], limit = 100) {
-    if (!this.initialized) {
-      throw new Error('Firebase not initialized');
-    }
-    
-    try {
-      let query = this.firestore.collection(collection);
-      
-      for (const filter of filters) {
-        query = query.where(filter.field, filter.operator, filter.value);
-      }
-      
-      if (limit) {
-        query = query.limit(limit);
-      }
-      
-      const snapshot = await query.get();
-      const results = [];
-      snapshot.forEach(doc => {
-        results.push({ id: doc.id, ...doc.data() });
-      });
-      
-      return results;
-    } catch (error) {
-      logger.error('❌ Failed to query collection:', error.message);
-      throw error;
-    }
-  }
-
-  // ============ FIREBASE MESSAGING ============
-
-  async sendPushNotification(token, title, body, data = {}) {
-    if (!this.initialized) {
-      logger.warn('⚠️ Firebase not initialized - skipping push notification');
-      return { success: false, message: 'Firebase not initialized' };
-    }
-    
-    try {
-      const message = {
-        token: token,
-        notification: {
-          title: title,
-          body: body
-        },
-        data: data
-      };
-      
-      const response = await this.messaging.send(message);
-      logger.info('✅ Push notification sent:', response);
-      return response;
-    } catch (error) {
-      logger.error('❌ Failed to send push notification:', error.message);
-      throw error;
-    }
-  }
-
-  async sendPushNotificationToTopic(topic, title, body, data = {}) {
-    if (!this.initialized) {
-      logger.warn('⚠️ Firebase not initialized - skipping push notification');
-      return { success: false, message: 'Firebase not initialized' };
-    }
-    
-    try {
-      const message = {
-        topic: topic,
-        notification: {
-          title: title,
-          body: body
-        },
-        data: data
-      };
-      
-      const response = await this.messaging.send(message);
-      logger.info('✅ Push notification sent to topic:', response);
-      return response;
-    } catch (error) {
-      logger.error('❌ Failed to send push notification to topic:', error.message);
-      throw error;
-    }
-  }
-
-  async sendMulticastPushNotification(tokens, title, body, data = {}) {
-    if (!this.initialized) {
-      logger.warn('⚠️ Firebase not initialized - skipping push notification');
-      return { success: false, message: 'Firebase not initialized' };
-    }
-    
-    try {
-      const message = {
-        tokens: tokens,
-        notification: {
-          title: title,
-          body: body
-        },
-        data: data
-      };
-      
-      const response = await this.messaging.sendEachForMulticast(message);
-      logger.info('✅ Multicast push notification sent:', response);
-      return response;
-    } catch (error) {
-      logger.error('❌ Failed to send multicast push notification:', error.message);
-      throw error;
-    }
-  }
-
-  // ============ HELPERS ============
-
   isInitialized() {
     return this.initialized;
   }
@@ -431,15 +203,12 @@ class FirebaseService {
     return this.messaging;
   }
 
-  // ============ HEALTH CHECK ============
-
   async healthCheck() {
     try {
       if (!this.initialized) {
         return { status: 'not_initialized', initialized: false };
       }
       
-      // اختبار الاتصال بـ Firebase
       await this.auth.getUser('test-user').catch(() => {});
       
       return { 
