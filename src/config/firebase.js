@@ -1,5 +1,6 @@
-const admin = require('firebase-admin');
-const logger = require('../core/utils/logger');
+const { initializeApp, cert, getApps } = require("firebase-admin/app");
+const { getAuth } = require("firebase-admin/auth");
+const logger = require("../core/utils/logger");
 
 class FirebaseService {
   constructor() {
@@ -11,46 +12,53 @@ class FirebaseService {
     if (this.initialized) return;
 
     try {
-      // قراءة المتغيرات
       const projectId = process.env.FIREBASE_PROJECT_ID;
       const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
       let privateKey = process.env.FIREBASE_PRIVATE_KEY;
 
-      // التحقق من وجود المتغيرات
       if (!projectId || !clientEmail || !privateKey) {
-        logger.warn('⚠️ Firebase credentials missing');
+        logger.warn("⚠️ Firebase credentials missing");
         return;
       }
 
-      // تنظيف المفتاح
-      privateKey = privateKey.replace(/\\n/g, '\n');
+      // تحويل \n إلى أسطر حقيقية
+      privateKey = privateKey.replace(/\\n/g, "\n");
 
-      // 🔥 استخدام الطريقة الصحيحة للتهيئة
-      const serviceAccount = {
-        projectId: projectId,
-        clientEmail: clientEmail,
-        privateKey: privateKey
-      };
+      // Debug Logs
+      logger.info(`Firebase Project: ${projectId}`);
+      logger.info(`Firebase Email: ${clientEmail}`);
+      logger.info(`Private Key Exists: ${!!privateKey}`);
 
-      // محاولة التهيئة
-      admin.initializeApp({
-        credential: admin.credential.cert(serviceAccount)
-      });
+      // لا تعيد التهيئة إذا كان التطبيق مهيأ بالفعل
+      const app =
+        getApps().length === 0
+          ? initializeApp({
+              credential: cert({
+                projectId,
+                clientEmail,
+                privateKey,
+              }),
+            })
+          : getApps()[0];
 
-      this.auth = admin.auth();
+      this.auth = getAuth(app);
       this.initialized = true;
-      
-      logger.info('✅ Firebase initialized successfully');
-      logger.info(`🔥 Project: ${projectId}`);
 
+      logger.info("✅ Firebase initialized successfully");
     } catch (error) {
-      logger.error('❌ Firebase init error:', error.message);
+      logger.error("❌ Firebase init error:", error.message);
+      logger.error(error.stack);
+
       this.initialized = false;
     }
   }
 
   isInitialized() {
     return this.initialized;
+  }
+
+  getAuth() {
+    return this.auth;
   }
 }
 
