@@ -1,12 +1,9 @@
 const mongoose = require('mongoose');
-const { v4: uuidv4 } = require('uuid');
-const BaseModel = require('../../../core/base/BaseModel');
 
 // ============ REPORT SCHEMA ============
 
 const reportSchema = new mongoose.Schema({
   // ===== Base Fields =====
-  _id: { type: String, default: () => uuidv4() },
   companyId: { type: String, required: true, index: true },
   factoryId: { type: String, required: true, index: true },
   createdBy: { type: String },
@@ -17,8 +14,7 @@ const reportSchema = new mongoose.Schema({
   status: {
     type: String,
     enum: ['draft', 'generating', 'completed', 'failed', 'archived'],
-    default: 'draft',
-    index: true
+    default: 'draft'
   },
 
   // ===== Basic Information =====
@@ -46,19 +42,10 @@ const reportSchema = new mongoose.Schema({
   type: {
     type: String,
     enum: [
-      'carbon',        // تقرير الكربون
-      'energy',        // تقرير الطاقة
-      'water',         // تقرير المياه
-      'waste',         // تقرير النفايات
-      'production',    // تقرير الإنتاج
-      'sustainability',// تقرير الاستدامة
-      'custom',        // تقرير مخصص
-      'compliance',    // تقرير الامتثال
-      'esg',          // تقرير ESG
-      'summary'       // تقرير ملخص
+      'carbon', 'energy', 'water', 'waste', 'production',
+      'sustainability', 'custom', 'compliance', 'esg', 'summary'
     ],
-    required: true,
-    index: true
+    required: true
   },
   format: {
     type: String,
@@ -73,8 +60,8 @@ const reportSchema = new mongoose.Schema({
 
   // ===== Period =====
   period: {
-    startDate: { type: Date, required: true, index: true },
-    endDate: { type: Date, required: true, index: true },
+    startDate: { type: Date, required: true },
+    endDate: { type: Date, required: true },
     type: {
       type: String,
       enum: ['daily', 'weekly', 'monthly', 'quarterly', 'yearly', 'custom'],
@@ -235,13 +222,17 @@ const reportSchema = new mongoose.Schema({
 });
 
 // ============ INDEXES ============
+// تم إزالة الفهارس المكررة - كل فهرس موجود مرة واحدة فقط
 
 reportSchema.index({ companyId: 1, type: 1, status: 1 });
 reportSchema.index({ companyId: 1, 'period.startDate': 1, 'period.endDate': 1 });
 reportSchema.index({ factoryId: 1, type: 1 });
 reportSchema.index({ code: 1 }, { unique: true });
 reportSchema.index({ status: 1 });
+reportSchema.index({ type: 1 });
 reportSchema.index({ createdAt: -1 });
+reportSchema.index({ 'period.startDate': 1 });
+reportSchema.index({ 'period.endDate': 1 });
 reportSchema.index({ deletedAt: 1 }, { sparse: true });
 
 // ============ VIRTUALS ============
@@ -355,7 +346,6 @@ reportSchema.methods.calculateNextGeneration = function() {
       break;
   }
   
-  // ضبط الوقت
   const timeParts = this.scheduling.time.split(':');
   next.setHours(parseInt(timeParts[0]), parseInt(timeParts[1]), 0, 0);
   
@@ -463,7 +453,6 @@ reportSchema.statics.findScheduled = async function() {
 
 // ============ MIDDLEWARE ============
 
-// Pre-save: تحديث updatedAt
 reportSchema.pre('save', function(next) {
   this.updatedAt = new Date();
   next();

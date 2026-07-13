@@ -1,12 +1,9 @@
 const mongoose = require('mongoose');
-const { v4: uuidv4 } = require('uuid');
-const BaseModel = require('../../../core/base/BaseModel');
 
 // ============ NOTIFICATION SCHEMA ============
 
 const notificationSchema = new mongoose.Schema({
   // ===== Base Fields =====
-  _id: { type: String, default: () => uuidv4() },
   companyId: { type: String, required: true, index: true },
   userId: { type: String, required: true, index: true },
   createdBy: { type: String },
@@ -17,8 +14,7 @@ const notificationSchema = new mongoose.Schema({
   status: {
     type: String,
     enum: ['pending', 'sent', 'delivered', 'read', 'failed', 'cancelled'],
-    default: 'pending',
-    index: true
+    default: 'pending'
   },
 
   // ===== Notification Content =====
@@ -44,19 +40,10 @@ const notificationSchema = new mongoose.Schema({
   type: {
     type: String,
     enum: [
-      'info',           // معلومات
-      'success',        // نجاح
-      'warning',        // تحذير
-      'error',          // خطأ
-      'alert',          // تنبيه
-      'reminder',       // تذكير
-      'update',         // تحديث
-      'report',         // تقرير
-      'notification',   // إشعار عام
-      'system'          // نظام
+      'info', 'success', 'warning', 'error', 'alert',
+      'reminder', 'update', 'report', 'notification', 'system'
     ],
-    required: true,
-    index: true
+    required: true
   },
   priority: {
     type: String,
@@ -66,24 +53,11 @@ const notificationSchema = new mongoose.Schema({
   category: {
     type: String,
     enum: [
-      'system',         // نظام
-      'security',       // أمن
-      'maintenance',    // صيانة
-      'production',     // إنتاج
-      'energy',         // طاقة
-      'water',          // مياه
-      'carbon',         // كربون
-      'waste',          // نفايات
-      'alert',          // تنبيه
-      'report',         // تقرير
-      'user',           // مستخدم
-      'company',        // شركة
-      'factory',        // مصنع
-      'machine',        // آلة
-      'sensor'          // حساس
+      'system', 'security', 'maintenance', 'production',
+      'energy', 'water', 'carbon', 'waste', 'alert',
+      'report', 'user', 'company', 'factory', 'machine', 'sensor'
     ],
-    required: true,
-    index: true
+    required: true
   },
 
   // ===== Channels =====
@@ -203,11 +177,15 @@ const notificationSchema = new mongoose.Schema({
 });
 
 // ============ INDEXES ============
+// تم إزالة الفهارس المكررة - كل فهرس موجود مرة واحدة فقط
 
 notificationSchema.index({ companyId: 1, userId: 1, status: 1 });
 notificationSchema.index({ userId: 1, createdAt: -1 });
 notificationSchema.index({ companyId: 1, status: 1, createdAt: -1 });
+notificationSchema.index({ userId: 1 });
+notificationSchema.index({ status: 1 });
 notificationSchema.index({ type: 1 });
+notificationSchema.index({ category: 1 });
 notificationSchema.index({ priority: 1 });
 notificationSchema.index({ scheduledAt: 1 });
 notificationSchema.index({ createdAt: -1 });
@@ -259,7 +237,6 @@ notificationSchema.methods.updateDeliveryStatus = function(channel, status, erro
     this.delivery[channel].sentAt = new Date();
     if (error) this.delivery[channel].error = error;
     
-    // تحديث الحالة العامة
     if (status === 'sent') {
       this.status = 'sent';
     } else if (status === 'failed') {
@@ -394,7 +371,6 @@ notificationSchema.statics.markAllAsRead = async function(userId) {
 
 // ============ MIDDLEWARE ============
 
-// Pre-save: تحديث updatedAt
 notificationSchema.pre('save', function(next) {
   this.updatedAt = new Date();
   next();

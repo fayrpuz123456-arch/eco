@@ -82,7 +82,16 @@ const companySchema = new mongoose.Schema({
 });
 
 // ============ INDEXES ============
+// تم إزالة الفهارس المكررة - كل فهرس موجود مرة واحدة فقط
+
 companySchema.index({ code: 1 }, { unique: true });
+companySchema.index({ name: 1 });
+companySchema.index({ industry: 1 });
+companySchema.index({ status: 1 });
+companySchema.index({ 'address.city': 1 });
+companySchema.index({ 'address.country': 1 });
+companySchema.index({ createdAt: -1 });
+companySchema.index({ deletedAt: 1 }, { sparse: true });
 
 // ============ VIRTUALS ============
 

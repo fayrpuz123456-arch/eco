@@ -4,7 +4,7 @@ const mongoose = require('mongoose');
 
 const userSchema = new mongoose.Schema({
   // ===== Base Fields =====
-  companyId: { type: String, required: true, default: 'comp_test_001', index: true },
+  companyId: { type: String, required: true, default: 'comp_test_001' },
   createdBy: { type: String },
   updatedBy: { type: String },
   createdAt: { type: Date, default: Date.now },
@@ -13,8 +13,7 @@ const userSchema = new mongoose.Schema({
   status: {
     type: String,
     enum: ['active', 'inactive', 'suspended', 'archived'],
-    default: 'active',
-    index: true
+    default: 'active'
   },
 
   // ===== Personal Information =====
@@ -24,8 +23,7 @@ const userSchema = new mongoose.Schema({
     unique: true,
     lowercase: true,
     trim: true,
-    match: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
-    index: true
+    match: /^[^\s@]+@[^\s@]+\.[^\s@]+$/
   },
   displayName: {
     type: String,
@@ -66,7 +64,6 @@ const userSchema = new mongoose.Schema({
     type: String,
     required: true,
     unique: true,
-    index: true,
     default: () => `firebase_${Date.now()}`
   },
   emailVerified: {
@@ -82,8 +79,7 @@ const userSchema = new mongoose.Schema({
   role: {
     type: String,
     enum: ['super_admin', 'admin', 'manager', 'engineer', 'employee', 'viewer'],
-    default: 'employee',
-    index: true
+    default: 'employee'
   },
   permissions: {
     type: [String],
@@ -93,13 +89,11 @@ const userSchema = new mongoose.Schema({
   // ===== Organization =====
   factoryIds: {
     type: [String],
-    default: [],
-    index: true
+    default: []
   },
   departmentIds: {
     type: [String],
-    default: [],
-    index: true
+    default: []
   },
   productionLineIds: {
     type: [String],
@@ -248,11 +242,15 @@ const userSchema = new mongoose.Schema({
 });
 
 // ============ INDEXES ============
+// تم إزالة الفهارس المكررة - كل فهرس موجود مرة واحدة فقط
 
+userSchema.index({ companyId: 1 });
 userSchema.index({ email: 1, companyId: 1 }, { unique: true });
 userSchema.index({ firebaseUid: 1 });
 userSchema.index({ role: 1 });
 userSchema.index({ status: 1 });
+userSchema.index({ factoryIds: 1 });
+userSchema.index({ departmentIds: 1 });
 userSchema.index({ 'preferences.language': 1 });
 userSchema.index({ createdAt: -1 });
 userSchema.index({ lastLogin: -1 });
@@ -581,7 +579,7 @@ userSchema.statics.getStats = async function(companyId) {
 
 // ============ MIDDLEWARE ============
 
-userSchema.pre('save', function() {
+userSchema.pre('save', function(next) {
   this.updatedAt = new Date();
   if (this.email) {
     this.email = this.email.toLowerCase().trim();
@@ -595,7 +593,7 @@ userSchema.pre('save', function() {
   if (this.lastName) {
     this.lastName = this.lastName.trim();
   }
-  // مفيش next() خالص - في Mongoose 9 أي throw هنا كافي إن الـ hook يوقف السيف بـ error
+  next();
 });
 
 // ============ EXPORT ============
