@@ -1,5 +1,4 @@
 const admin = require('firebase-admin');
-const config = require('./index');
 const logger = require('../core/utils/logger');
 
 class FirebaseService {
@@ -15,11 +14,17 @@ class FirebaseService {
     }
 
     try {
-      // التحقق من وجود المتغيرات
-      const projectId = process.env.FIREBASE_PROJECT_ID || config.firebase?.projectId;
-      const clientEmail = process.env.FIREBASE_CLIENT_EMAIL || config.firebase?.clientEmail;
-      let privateKey = process.env.FIREBASE_PRIVATE_KEY || config.firebase?.privateKey;
+      // قراءة المتغيرات مباشرة من process.env
+      const projectId = process.env.FIREBASE_PROJECT_ID;
+      const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
+      let privateKey = process.env.FIREBASE_PRIVATE_KEY;
 
+      console.log('🔍 Checking Firebase credentials...');
+      console.log('🔍 FIREBASE_PROJECT_ID:', projectId ? '✅ Found' : '❌ Missing');
+      console.log('🔍 FIREBASE_CLIENT_EMAIL:', clientEmail ? '✅ Found' : '❌ Missing');
+      console.log('🔍 FIREBASE_PRIVATE_KEY:', privateKey ? '✅ Found' : '❌ Missing');
+
+      // التحقق من وجود المتغيرات
       if (!projectId || !clientEmail || !privateKey) {
         logger.warn('⚠️ Firebase credentials missing. Skipping Firebase initialization.');
         logger.warn('📝 Required: FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, FIREBASE_PRIVATE_KEY');
@@ -28,6 +33,8 @@ class FirebaseService {
 
       // تنظيف المفتاح
       privateKey = privateKey.replace(/\\n/g, '\n');
+
+      logger.info('🔍 Firebase credentials found, initializing...');
 
       // تهيئة Firebase
       admin.initializeApp({
