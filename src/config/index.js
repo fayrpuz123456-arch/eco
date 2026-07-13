@@ -14,8 +14,6 @@ module.exports = {
   mongodb: {
     uri: process.env.MONGODB_URI || 'mongodb://localhost:27017/ecoguardian',
     options: {
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
       maxPoolSize: 10,
       minPoolSize: 2,
       socketTimeoutMS: 45000,
@@ -118,4 +116,4 @@ module.exports = {
     enableRedis: process.env.ENABLE_REDIS === 'true' || false,
     enableAI: process.env.ENABLE_AI === 'true' || false
   }
-}; 
+};
