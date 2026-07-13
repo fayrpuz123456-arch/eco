@@ -31,21 +31,25 @@ class FirebaseService {
         return;
       }
 
+      // 🔍 DIAGNOSTIC LOGGING — احذف السطور دي بعد ما تحل المشكلة
+      logger.info(`🔍 Node.js version: ${process.version}`);
+      logger.info(`🔍 firebase-admin resolved from: ${require.resolve('firebase-admin')}`);
+      logger.info(`🔍 firebase-admin package.json version: ${require('firebase-admin/package.json').version}`);
+      logger.info(`🔍 admin keys: ${Object.keys(admin).join(', ')}`);
+      logger.info(`🔍 typeof admin.credential: ${typeof admin.credential}`);
+      // 🔍 END DIAGNOSTIC LOGGING
+
       // ✅ فحص دفاعي: تأكد إن مكتبة firebase-admin اتحملت صح
-      // لو ده طلع فاضي، المشكلة مش في الكود ده، المشكلة إن الباكدج
-      // firebase-admin مش متثبتة صح في بيئة الإنتاج (production) بتاعتك
       if (!admin || typeof admin.credential === 'undefined' || typeof admin.credential.cert !== 'function') {
         throw new Error(
           "admin.credential.cert غير موجودة. " +
-          "غالباً firebase-admin مش متثبتة صح في بيئة الإنتاج، أو موجودة في devDependencies " +
-          "بدل dependencies، أو فيه أكتر من نسخة متضاربة. " +
-          "شغّل: npm ls firebase-admin  وتأكد إنها موجودة تحت dependencies في package.json، " +
-          "بعدين: rm -rf node_modules package-lock.json && npm install"
+          "غالباً firebase-admin مش متثبتة صح في بيئة الإنتاج، أو Node.js version قديمة " +
+          "(firebase-admin v14 محتاج Node 20+)، أو فيه أكتر من نسخة متضاربة. " +
+          "شغّل: node -v  و  npm ls firebase-admin  للتشخيص."
         );
       }
 
-      // ✅ إصلاح مشكلة شائعة جداً: لو الـ private key جاي من .env كـ string
-      // فيه \n حرفية (literal) بدل سطر جديد حقيقي، لازم نستبدلها
+      // ✅ إصلاح مشكلة شائعة: private key بيجي من .env كـ \n حرفية بدل سطر جديد حقيقي
       const rawPrivateKey = config.firebase.privateKey;
       const privateKey = rawPrivateKey.includes('\\n')
         ? rawPrivateKey.replace(/\\n/g, '\n')
