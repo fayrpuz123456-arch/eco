@@ -25,24 +25,39 @@ class App {
 
   async initialize() {
     try {
-      // تهيئة Firebase
-      firebaseService.initialize();
+      logger.info('🔍 Starting application initialization...');
+      logger.info(`🔍 Node.js version: ${process.version}`);
+
+      // تهيئة Firebase مع تتبع
+      try {
+        logger.info('🔍 Initializing Firebase...');
+        firebaseService.initialize();
+        logger.info(`🔍 Firebase initialized: ${firebaseService.isInitialized()}`);
+      } catch (fbError) {
+        logger.error('❌ Firebase initialization failed:', fbError.message);
+        logger.error('📝 Stack:', fbError.stack);
+      }
 
       // الاتصال بقاعدة البيانات
+      logger.info('🔍 Connecting to MongoDB...');
       await database.connect();
+      logger.info('✅ MongoDB connected successfully');
 
       // إعداد الـ Middleware
+      logger.info('🔍 Setting up middleware...');
       this.setupMiddleware();
 
       // إعداد الـ Routes
+      logger.info('🔍 Setting up routes...');
       this.setupRoutes();
 
       // إعداد معالجة الأخطاء
       this.setupErrorHandling();
 
-      logger.info('Application initialized successfully');
+      logger.info('✅ Application initialized successfully');
     } catch (error) {
-      logger.error('Failed to initialize application:', error);
+      logger.error('❌ Failed to initialize application:', error);
+      logger.error('📝 Stack:', error.stack);
       throw error;
     }
   }
@@ -119,15 +134,15 @@ class App {
         const routeModule = require(route.path);
         if (routeModule && typeof routeModule === 'function') {
           apiV1.use(`/${route.name}`, routeModule);
-          console.log(`✅ ${route.name} routes loaded at /api/v1/${route.name}`);
+          logger.info(`✅ ${route.name} routes loaded at /api/v1/${route.name}`);
           loadedCount++;
         }
       } catch (error) {
-        console.log(`⚠️ ${route.name} routes not found`);
+        logger.warn(`⚠️ ${route.name} routes not found`);
       }
     }
 
-    console.log(`📊 Total routes loaded: ${loadedCount}/${routes.length}`);
+    logger.info(`📊 Total routes loaded: ${loadedCount}/${routes.length}`);
 
     // ===== Base route =====
     apiV1.get('/', (req, res) => {
@@ -171,10 +186,10 @@ class App {
   start() {
     const port = config.port || 3000;
     this.server = this.app.listen(port, () => {
-      console.log(`🚀 EcoGuardian server running on port ${port}`);
-      console.log(`📚 Environment: ${config.env || 'development'}`);
-      console.log(`🔗 API URL: http://localhost:${port}/api/v1`);
-      console.log(`📖 Health: http://localhost:${port}/health`);
+      logger.info(`🚀 EcoGuardian server running on port ${port}`);
+      logger.info(`📚 Environment: ${config.env || 'development'}`);
+      logger.info(`🔗 API URL: http://localhost:${port}/api/v1`);
+      logger.info(`📖 Health: http://localhost:${port}/health`);
     });
 
     // Graceful shutdown
@@ -183,16 +198,16 @@ class App {
   }
 
   async shutdown() {
-    console.log('🛑 Shutting down server...');
+    logger.info('🛑 Shutting down server...');
     try {
       await database.disconnect();
       if (this.server) {
         await new Promise((resolve) => this.server.close(resolve));
       }
-      console.log('✅ Server shutdown completed');
+      logger.info('✅ Server shutdown completed');
       process.exit(0);
     } catch (error) {
-      console.error('❌ Error during shutdown:', error);
+      logger.error('❌ Error during shutdown:', error);
       process.exit(1);
     }
   }
