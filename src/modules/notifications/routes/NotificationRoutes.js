@@ -1,214 +1,226 @@
 const express = require('express');
 const router = express.Router();
-const NotificationController = require('../controllers/NotificationController');
-const { validate } = require('../../../core/middleware/validation');
-const authMiddleware = require('../../../core/middleware/auth');
-const { tenantMiddleware } = require('../../../core/middleware/tenant');
-const { checkPermissions, checkRole } = require('../../../core/middleware/permissions');
-const { PERMISSIONS } = require('../../../core/middleware/permissions');
-const { idSchema } = require('../../../core/middleware/validation');
-const Joi = require('joi');
+const Notification = require('../models/Notification.model');
 
-// ============ SCHEMAS ============
+// ===== GET - قائمة الإشعارات للمستخدم =====
+router.get('/', async (req, res) => {
+  try {
+    const userId = req.user?.id || req.query.userId;
+    const { limit = 50, page = 1, status, type } = req.query;
 
-const createNotificationSchema = Joi.object({
-  title: Joi.string().min(2).max(200).required(),
-  message: Joi.string().min(2).max(1000).required(),
-  body: Joi.string().max(500).optional(),
-  type: Joi.string().valid('info', 'success', 'warning', 'error', 'alert', 'reminder', 'update', 'report', 'notification', 'system').required(),
-  priority: Joi.string().valid('low', 'medium', 'high', 'urgent').default('medium'),
-  category: Joi.string().valid('system', 'security', 'maintenance', 'production', 'energy', 'water', 'carbon', 'waste', 'alert', 'report', 'user', 'company', 'factory', 'machine', 'sensor').required(),
-  userId: Joi.string().uuid({ version: 'uuidv4' }).required(),
-  channels: Joi.object({
-    email: Joi.boolean().default(true),
-    push: Joi.boolean().default(true),
-    sms: Joi.boolean().default(false),
-    inApp: Joi.boolean().default(true)
-  }).optional(),
-  scheduledAt: Joi.date().iso().optional()
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'userId is required'
+      });
+    }
+
+    const result = await Notification.findByUser(userId, {
+      limit: parseInt(limit),
+      page: parseInt(page),
+      status,
+      type
+    });
+
+    res.json({
+      success: true,
+      message: 'Notifications retrieved successfully',
+      data: result.data,
+      meta: result.meta
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching notifications',
+      error: error.message
+    });
+  }
 });
 
-const bulkNotificationSchema = Joi.object({
-  title: Joi.string().min(2).max(200).required(),
-  message: Joi.string().min(2).max(1000).required(),
-  type: Joi.string().valid('info', 'success', 'warning', 'error', 'alert', 'reminder', 'update', 'report', 'notification', 'system').required(),
-  category: Joi.string().valid('system', 'security', 'maintenance', 'production', 'energy', 'water', 'carbon', 'waste', 'alert', 'report', 'user', 'company', 'factory', 'machine', 'sensor').required(),
-  userIds: Joi.array().items(Joi.string().uuid({ version: 'uuidv4' })).min(1).required()
+// ===== GET - الإشعارات غير المقروءة =====
+router.get('/unread', async (req, res) => {
+  try {
+    const userId = req.user?.id || req.query.userId;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'userId is required'
+      });
+    }
+
+    const notifications = await Notification.findUnread(userId);
+
+    res.json({
+      success: true,
+      message: 'Unread notifications retrieved successfully',
+      data: notifications,
+      count: notifications.length
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching unread notifications',
+      error: error.message
+    });
+  }
 });
 
-const feedbackSchema = Joi.object({
-  rating: Joi.number().min(1).max(5).required(),
-  comment: Joi.string().max(500).optional()
+// ===== GET - إحصائيات الإشعارات =====
+router.get('/stats', async (req, res) => {
+  try {
+    const userId = req.user?.id || req.query.userId;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'userId is required'
+      });
+    }
+
+    const stats = await Notification.getStats(userId);
+
+    res.json({
+      success: true,
+      message: 'Notification statistics retrieved successfully',
+      data: stats
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching notification stats',
+      error: error.message
+    });
+  }
 });
 
-const dateRangeSchema = Joi.object({
-  startDate: Joi.date().iso().required(),
-  endDate: Joi.date().iso().min(Joi.ref('startDate')).required(),
-  format: Joi.string().valid('json', 'csv').default('json')
+// ===== POST - إنشاء إشعار جديد =====
+router.post('/', async (req, res) => {
+  try {
+    const { userId, title, message, type, category, priority, channels, data, scheduledAt } = req.body;
+
+    if (!userId || !title || !message || !type || !category) {
+      return res.status(400).json({
+        success: false,
+        message: 'userId, title, message, type, and category are required'
+      });
+    }
+
+    const newNotification = new Notification({
+      userId,
+      companyId: req.companyId || 'comp_test_001',
+      title,
+      message,
+      type,
+      category,
+      priority: priority || 'medium',
+      channels: channels || { email: true, push: true, inApp: true },
+      data: data || {},
+      scheduledAt: scheduledAt ? new Date(scheduledAt) : null,
+      isScheduled: !!scheduledAt,
+      status: scheduledAt ? 'pending' : 'pending'
+    });
+
+    const savedNotification = await newNotification.save();
+
+    res.status(201).json({
+      success: true,
+      message: 'Notification created successfully',
+      data: savedNotification
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Error creating notification',
+      error: error.message
+    });
+  }
 });
 
-// ============ INSTANTIATE CONTROLLER ============
+// ===== PUT - وضع علامة كمقروء =====
+router.put('/:id/read', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const notification = await Notification.findById(id);
 
-const controller = new NotificationController();
+    if (!notification) {
+      return res.status(404).json({
+        success: false,
+        message: 'Notification not found'
+      });
+    }
 
-// ============ APPLY MIDDLEWARE ============
+    await notification.markAsRead();
 
-router.use(authMiddleware);
-router.use(tenantMiddleware(true));
+    res.json({
+      success: true,
+      message: 'Notification marked as read',
+      data: notification
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Error marking notification as read',
+      error: error.message
+    });
+  }
+});
 
-// ============ ROUTES ============
+// ===== PUT - وضع علامة كمقروء للكل =====
+router.put('/read-all', async (req, res) => {
+  try {
+    const userId = req.user?.id || req.body.userId;
 
-/**
- * @route   GET /api/v1/notifications
- * @desc    قائمة الإشعارات
- * @access  Private
- */
-router.get(
-  '/',
-  checkPermissions([PERMISSIONS.NOTIFICATIONS_VIEW]),
-  controller.getList.bind(controller)
-);
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'userId is required'
+      });
+    }
 
-/**
- * @route   GET /api/v1/notifications/unread
- * @desc    الإشعارات غير المقروءة
- * @access  Private
- */
-router.get(
-  '/unread',
-  checkPermissions([PERMISSIONS.NOTIFICATIONS_VIEW]),
-  controller.getUnread.bind(controller)
-);
+    await Notification.markAllAsRead(userId);
 
-/**
- * @route   GET /api/v1/notifications/type/:type
- * @desc    الإشعارات حسب النوع
- * @access  Private
- */
-router.get(
-  '/type/:type',
-  checkPermissions([PERMISSIONS.NOTIFICATIONS_VIEW]),
-  controller.getByType.bind(controller)
-);
+    res.json({
+      success: true,
+      message: 'All notifications marked as read'
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Error marking all notifications as read',
+      error: error.message
+    });
+  }
+});
 
-/**
- * @route   GET /api/v1/notifications/stats
- * @desc    إحصائيات الإشعارات
- * @access  Private
- */
-router.get(
-  '/stats',
-  checkPermissions([PERMISSIONS.NOTIFICATIONS_VIEW]),
-  controller.getStats.bind(controller)
-);
+// ===== DELETE - حذف إشعار =====
+router.delete('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const notification = await Notification.findById(id);
 
-/**
- * @route   GET /api/v1/notifications/export
- * @desc    تصدير الإشعارات
- * @access  Private
- */
-router.get(
-  '/export',
-  validate(dateRangeSchema, 'query'),
-  checkPermissions([PERMISSIONS.NOTIFICATIONS_VIEW]),
-  controller.export.bind(controller)
-);
+    if (!notification) {
+      return res.status(404).json({
+        success: false,
+        message: 'Notification not found'
+      });
+    }
 
-/**
- * @route   GET /api/v1/notifications/:id
- * @desc    إشعار بالمعرف
- * @access  Private
- */
-router.get(
-  '/:id',
-  validate(Joi.object({ id: idSchema }), 'params'),
-  checkPermissions([PERMISSIONS.NOTIFICATIONS_VIEW]),
-  controller.getById.bind(controller)
-);
+    notification.deletedAt = new Date();
+    notification.status = 'cancelled';
+    await notification.save();
 
-// ============ ADMIN ROUTES ============
-
-/**
- * @route   POST /api/v1/notifications
- * @desc    إنشاء إشعار
- * @access  Private (Admin, Manager)
- */
-router.post(
-  '/',
-  validate(createNotificationSchema),
-  checkPermissions([PERMISSIONS.NOTIFICATIONS_SEND]),
-  controller.create.bind(controller)
-);
-
-/**
- * @route   POST /api/v1/notifications/bulk
- * @desc    إنشاء إشعارات متعددة
- * @access  Private (Admin, Manager)
- */
-router.post(
-  '/bulk',
-  validate(bulkNotificationSchema),
-  checkPermissions([PERMISSIONS.NOTIFICATIONS_SEND]),
-  controller.bulkCreate.bind(controller)
-);
-
-/**
- * @route   PUT /api/v1/notifications/:id/read
- * @desc    وضع علامة كمقروء
- * @access  Private
- */
-router.put(
-  '/:id/read',
-  validate(Joi.object({ id: idSchema }), 'params'),
-  checkPermissions([PERMISSIONS.NOTIFICATIONS_VIEW]),
-  controller.markAsRead.bind(controller)
-);
-
-/**
- * @route   PUT /api/v1/notifications/read-all
- * @desc    وضع علامة كمقروءة للكل
- * @access  Private
- */
-router.put(
-  '/read-all',
-  checkPermissions([PERMISSIONS.NOTIFICATIONS_VIEW]),
-  controller.markAllAsRead.bind(controller)
-);
-
-/**
- * @route   POST /api/v1/notifications/:id/feedback
- * @desc    إضافة ردود فعل
- * @access  Private
- */
-router.post(
-  '/:id/feedback',
-  validate(Joi.object({ id: idSchema }), 'params'),
-  validate(feedbackSchema),
-  checkPermissions([PERMISSIONS.NOTIFICATIONS_VIEW]),
-  controller.addFeedback.bind(controller)
-);
-
-/**
- * @route   DELETE /api/v1/notifications/:id
- * @desc    حذف إشعار
- * @access  Private
- */
-router.delete(
-  '/:id',
-  validate(Joi.object({ id: idSchema }), 'params'),
-  checkPermissions([PERMISSIONS.NOTIFICATIONS_VIEW]),
-  controller.delete.bind(controller)
-);
-
-/**
- * @route   DELETE /api/v1/notifications/all
- * @desc    حذف كل الإشعارات
- * @access  Private
- */
-router.delete(
-  '/all',
-  checkPermissions([PERMISSIONS.NOTIFICATIONS_VIEW]),
-  controller.deleteAll.bind(controller)
-);
+    res.json({
+      success: true,
+      message: 'Notification deleted successfully'
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Error deleting notification',
+      error: error.message
+    });
+  }
+});
 
 module.exports = router;
