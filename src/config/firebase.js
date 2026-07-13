@@ -1,4 +1,5 @@
 const admin = require('firebase-admin');
+const config = require('./index');
 const logger = require('../core/utils/logger');
 
 class FirebaseService {
@@ -8,79 +9,38 @@ class FirebaseService {
   }
 
   initialize() {
-    if (this.initialized) {
-      logger.info('✅ Firebase already initialized');
-      return;
-    }
+    if (this.initialized) return;
 
     try {
-      // قراءة المتغيرات مباشرة من process.env
-      const projectId = process.env.FIREBASE_PROJECT_ID;
-      const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
-      let privateKey = process.env.FIREBASE_PRIVATE_KEY;
+      const { projectId, clientEmail, privateKey } = config.firebase;
 
-      console.log('🔍 Checking Firebase credentials...');
-      console.log('🔍 FIREBASE_PROJECT_ID:', projectId ? '✅ Found' : '❌ Missing');
-      console.log('🔍 FIREBASE_CLIENT_EMAIL:', clientEmail ? '✅ Found' : '❌ Missing');
-      console.log('🔍 FIREBASE_PRIVATE_KEY:', privateKey ? '✅ Found' : '❌ Missing');
-
-      // التحقق من وجود المتغيرات
       if (!projectId || !clientEmail || !privateKey) {
-        logger.warn('⚠️ Firebase credentials missing. Skipping Firebase initialization.');
-        logger.warn('📝 Required: FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, FIREBASE_PRIVATE_KEY');
+        logger.warn('⚠️ Firebase credentials missing in config');
         return;
       }
 
       // تنظيف المفتاح
-      privateKey = privateKey.replace(/\\n/g, '\n');
+      let cleanedKey = privateKey;
+      if (cleanedKey.startsWith('"') && cleanedKey.endsWith('"')) {
+        cleanedKey = cleanedKey.slice(1, -1);
+      }
+      cleanedKey = cleanedKey.replace(/\\n/g, '\n');
 
-      logger.info('🔍 Firebase credentials found, initializing...');
-
-      // تهيئة Firebase
       admin.initializeApp({
         credential: admin.credential.cert({
           projectId: projectId,
           clientEmail: clientEmail,
-          privateKey: privateKey
+          privateKey: cleanedKey
         })
       });
 
       this.auth = admin.auth();
       this.initialized = true;
-      
       logger.info('✅ Firebase initialized successfully');
       logger.info(`🔥 Project: ${projectId}`);
-
     } catch (error) {
       logger.error('❌ Firebase init error:', error.message);
-      logger.error('📝 Stack:', error.stack);
       this.initialized = false;
-    }
-  }
-
-  async verifyToken(token) {
-    if (!this.initialized) {
-      logger.warn('⚠️ Firebase not initialized - skipping token verification');
-      return null;
-    }
-    try {
-      return await this.auth.verifyIdToken(token);
-    } catch (error) {
-      logger.error('❌ Token verification failed:', error.message);
-      throw new Error('Invalid token');
-    }
-  }
-
-  async getUser(uid) {
-    if (!this.initialized) {
-      logger.warn('⚠️ Firebase not initialized - skipping getUser');
-      return null;
-    }
-    try {
-      return await this.auth.getUser(uid);
-    } catch (error) {
-      logger.error('❌ Get user failed:', error.message);
-      throw new Error('User not found');
     }
   }
 
