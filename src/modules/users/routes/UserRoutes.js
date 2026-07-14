@@ -4,6 +4,9 @@ const router = express.Router();
 // ===== IMPORT USER MODEL - VERSION SANS BaseModel =====
 const User = require('../models/User.model');
 
+// ✅ استيراد Auth Middleware
+const { authMiddleware } = require('../../../core/middleware/auth');
+
 // ===== GET - قائمة المستخدمين من قاعدة البيانات =====
 router.get('/', async (req, res) => {
   try {
@@ -20,6 +23,35 @@ router.get('/', async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Error fetching users',
+      error: error.message
+    });
+  }
+});
+
+// ===== GET /me - الملف الشخصي (مع Auth Middleware) =====
+router.get('/me', authMiddleware, async (req, res) => {
+  try {
+    // الـ authMiddleware بيحط المستخدم في req.user
+    // البحث باستخدام firebaseUid بدل _id
+    const user = await User.findOne({ firebaseUid: req.user.id });
+    
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Profile retrieved successfully',
+      data: user.toPublicJSON ? user.toPublicJSON() : user
+    });
+  } catch (error) {
+    console.error('❌ GET /me error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching profile',
       error: error.message
     });
   }
@@ -57,7 +89,7 @@ router.post('/', async (req, res) => {
   try {
     console.log('📝 POST /users - Body:', req.body);
     
-    const { email, displayName, role } = req.body;
+    const { email, displayName, role, firebaseUid } = req.body; // ✅ إضافة firebaseUid
 
     // التحقق من البيانات المطلوبة
     if (!email || !displayName) {
@@ -84,14 +116,14 @@ router.post('/', async (req, res) => {
     }
 
     console.log('✅ Creating new user...');
-    // إنشاء مستخدم جديد - بدون BaseModel
+    // إنشاء مستخدم جديد
     const newUser = new User({
       email,
       displayName,
       role: role || 'employee',
       status: 'active',
       companyId: 'comp_test_001',
-      firebaseUid: `firebase_${Date.now()}`
+      firebaseUid: firebaseUid || `firebase_${Date.now()}` // ✅ استخدام القيمة المرسلة أو إنشاء واحدة
     });
 
     console.log('📦 Saving user to database...');
@@ -121,7 +153,7 @@ router.post('/', async (req, res) => {
 router.put('/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { displayName, role, email } = req.body;
+    const { displayName, role, email, firebaseUid, deletedAt, status } = req.body; // ✅ إضافة الحقول
 
     const user = await User.findById(id);
     if (!user) {
@@ -135,6 +167,9 @@ router.put('/:id', async (req, res) => {
     if (displayName) user.displayName = displayName;
     if (role) user.role = role;
     if (email) user.email = email;
+    if (firebaseUid) user.firebaseUid = firebaseUid; // ✅ تحديث firebaseUid
+    if (deletedAt !== undefined) user.deletedAt = deletedAt; // ✅ تحديث deletedAt
+    if (status) user.status = status; // ✅ تحديث status
 
     const updatedUser = await user.save();
 
@@ -185,33 +220,6 @@ router.delete('/:id', async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Error deleting user',
-      error: error.message
-    });
-  }
-});
-
-// ===== GET /me - الملف الشخصي =====
-router.get('/me', async (req, res) => {
-  try {
-    const user = await User.findOne();
-    
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: 'No user found'
-      });
-    }
-
-    res.json({
-      success: true,
-      message: 'Profile retrieved successfully',
-      data: user
-    });
-  } catch (error) {
-    console.error('❌ GET /me error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error fetching profile',
       error: error.message
     });
   }

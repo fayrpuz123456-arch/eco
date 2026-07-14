@@ -9,6 +9,9 @@ const {
 const { eventEmitter, EventTypes } = require('../../../core/events/eventEmitter');
 const logger = require('../../../core/utils/logger');
 
+// ============ استيراد AI Service ============
+const aiService = require('../../../core/services/AIService');
+
 class EnergyService extends BaseService {
   constructor() {
     super(new EnergyRepository(), 'Energy');
@@ -329,7 +332,7 @@ class EnergyService extends BaseService {
         });
       }
 
-      if (energy.kpis.renewablePercentage < 20) {
+      if (energy.kpis?.renewablePercentage < 20) {
         recommendations.push({
           title: 'زيادة استخدام الطاقة المتجددة',
           description: 'تركيب ألواح شمسية أو شراء طاقة خضراء',
@@ -339,7 +342,7 @@ class EnergyService extends BaseService {
         });
       }
 
-      if (energy.efficiency.overall < 70) {
+      if (energy.efficiency?.overall < 70) {
         recommendations.push({
           title: 'تحسين الكفاءة العامة',
           description: 'تطبيق نظام إدارة الطاقة ISO 50001',
@@ -355,6 +358,293 @@ class EnergyService extends BaseService {
       return recommendations;
     } catch (error) {
       logger.error('Error generating recommendations:', error);
+      throw error;
+    }
+  }
+
+  // ============ 🤖 AI INTEGRATION ============
+
+  /**
+   * 🟡 استدعاء AI Service لتوقع استهلاك الطاقة
+   * هذا الميثود يستدعي خدمة AI الخارجية لتوقع استهلاك الطاقة المستقبلي
+   * 
+   * 📌 عند جاهزية AI Service:
+   * 1. تأكد من أن `config.features.enableAI = true`
+   * 2. تأكد من أن `config.ai.serviceUrl` يشير إلى عنوان AI Service الصحيح
+   * 3. الدالة حالياً ترجع Mock Data في حالة عدم توفر AI Service
+   */
+  async predictConsumption(energyId, companyId, hours = 24) {
+    try {
+      const energy = await this.repository.findById(energyId, companyId);
+      if (!energy) {
+        throw new NotFoundError('Energy record not found');
+      }
+
+      // تجهيز البيانات المرسلة لـ AI Service
+      const data = {
+        id: energy._id,
+        type: energy.type,
+        source: energy.source,
+        currentConsumption: energy.consumption?.total || 0,
+        electricity: energy.consumption?.electricity?.total || 0,
+        fuel: energy.consumption?.fuel?.total || 0,
+        gas: energy.consumption?.gas?.total || 0,
+        renewable: energy.consumption?.renewable?.total || 0,
+        historicalData: await this.getHistoricalConsumption(energy.factoryId, companyId),
+        hours: hours,
+        period: energy.period,
+        factoryId: energy.factoryId,
+        companyId: companyId
+      };
+
+      // استدعاء AI Service
+      const prediction = await aiService.predictConsumption(data);
+      
+      // حفظ التوقع في الطاقة (إذا كان الحقل موجوداً)
+      if (energy.prediction !== undefined) {
+        energy.prediction = prediction;
+        await energy.save();
+      }
+
+      logger.info('Energy consumption prediction completed', {
+        energyId: energyId,
+        predictedConsumption: prediction.prediction,
+        confidence: prediction.confidence
+      });
+
+      return prediction;
+    } catch (error) {
+      logger.error('Error predicting energy consumption:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * الحصول على البيانات التاريخية للاستهلاك
+   * تستخدم كمدخل لـ AI Service
+   */
+  async getHistoricalConsumption(factoryId, companyId, months = 12) {
+    const startDate = new Date();
+    startDate.setMonth(startDate.getMonth() - months);
+
+    const records = await this.repository.find({
+      factoryId,
+      'period.startDate': { $gte: startDate },
+    }, companyId);
+
+    return records.map(r => ({
+      date: r.period?.startDate || r.createdAt,
+      consumption: r.consumption?.total || 0,
+      electricity: r.consumption?.electricity?.total || 0,
+      fuel: r.consumption?.fuel?.total || 0,
+      gas: r.consumption?.gas?.total || 0,
+      renewable: r.consumption?.renewable?.total || 0,
+      cost: r.cost?.total || 0
+    }));
+  }
+
+  /**
+   * 🟡 تحليل استعادة الحرارة المهدرة (Heat Recovery)
+   * يستدعي AI Service لتحليل الحرارة المهدرة واقتراح حلول
+   */
+  async analyzeHeatRecovery(energyId, companyId) {
+    try {
+      const energy = await this.repository.findById(energyId, companyId);
+      if (!energy) {
+        throw new NotFoundError('Energy record not found');
+      }
+
+      const data = {
+        energyId: energy._id,
+        type: energy.type,
+        source: energy.source,
+        totalConsumption: energy.consumption?.total || 0,
+        fuelConsumption: energy.consumption?.fuel?.total || 0,
+        gasConsumption: energy.consumption?.gas?.total || 0,
+        efficiency: energy.efficiency?.overall || 0,
+        temperature: energy.metadata?.temperature || 0,
+        factoryId: energy.factoryId,
+        companyId: companyId
+      };
+
+      const analysis = await aiService.analyzeHeatRecovery(data);
+
+      logger.info('Heat recovery analysis completed', {
+        energyId: energyId,
+        recoverableHeat: analysis.recoverableHeat,
+        potentialSavings: analysis.potentialSavings
+      });
+
+      return analysis;
+    } catch (error) {
+      logger.error('Error analyzing heat recovery:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 🟡 اكتشاف الشذوذ في استهلاك الطاقة
+   * يستدعي AI Service لاكتشاف القراءات غير الطبيعية
+   */
+  async detectEnergyAnomalies(energyId, companyId, startDate, endDate) {
+    try {
+      const energy = await this.repository.findById(energyId, companyId);
+      if (!energy) {
+        throw new NotFoundError('Energy record not found');
+      }
+
+      // جلب القراءات للفترة المطلوبة
+      const readings = await this.repository.getReadingsInRange(
+        energyId,
+        startDate,
+        endDate,
+        1000
+      );
+
+      const data = {
+        energyId: energy._id,
+        type: energy.type,
+        readings: readings.map(r => ({
+          timestamp: r.timestamp,
+          value: r.value,
+          unit: r.unit || 'kWh'
+        })),
+        threshold: 3,
+        factoryId: energy.factoryId,
+        companyId: companyId
+      };
+
+      const anomalies = await aiService.detectAnomalies(data);
+
+      logger.info('Energy anomaly detection completed', {
+        energyId: energyId,
+        anomaliesFound: anomalies.anomalies?.length || 0
+      });
+
+      return anomalies;
+    } catch (error) {
+      logger.error('Error detecting energy anomalies:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 🟡 تحليل What-If للطاقة
+   * يستدعي AI Service لتحليل سيناريوهات مختلفة لتوفير الطاقة
+   */
+  async analyzeEnergyWhatIf(energyId, companyId, scenario) {
+    try {
+      const energy = await this.repository.findById(energyId, companyId);
+      if (!energy) {
+        throw new NotFoundError('Energy record not found');
+      }
+
+      const data = {
+        energyId: energy._id,
+        currentConsumption: energy.consumption?.total || 0,
+        currentCost: energy.cost?.total || 0,
+        scenario: scenario || {
+          type: 'solar_panels',
+          investment: 50000,
+          expectedSavings: 20 // نسبة مئوية
+        },
+        factoryId: energy.factoryId,
+        companyId: companyId
+      };
+
+      const analysis = await aiService.whatIfAnalysis(data);
+
+      logger.info('Energy what-if analysis completed', {
+        energyId: energyId,
+        scenario: data.scenario.type
+      });
+
+      return analysis;
+    } catch (error) {
+      logger.error('Error analyzing energy what-if:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 🟡 توليد توصيات ذكية من AI للطاقة
+   * يستدعي AI Service لتوليد توصيات مخصصة بناءً على بيانات الطاقة
+   */
+  async generateAIRecommendations(energyId, companyId) {
+    try {
+      const energy = await this.repository.findById(energyId, companyId);
+      if (!energy) {
+        throw new NotFoundError('Energy record not found');
+      }
+
+      // تجهيز البيانات
+      const data = {
+        energyId: energy._id,
+        currentConsumption: energy.consumption?.total || 0,
+        electricity: energy.consumption?.electricity?.total || 0,
+        fuel: energy.consumption?.fuel?.total || 0,
+        gas: energy.consumption?.gas?.total || 0,
+        renewable: energy.consumption?.renewable?.total || 0,
+        cost: energy.cost?.total || 0,
+        efficiency: energy.efficiency?.overall || 0,
+        reductionTarget: energy.targets?.consumptionReduction || 0,
+        renewableTarget: energy.targets?.renewableTarget || 0,
+        factoryId: energy.factoryId,
+        companyId: companyId,
+        type: energy.type,
+        source: energy.source
+      };
+
+      const recommendations = await aiService.generateRecommendations(data);
+
+      // حفظ التوصيات في الطاقة
+      energy.recommendations = recommendations.recommendations || [];
+      await energy.save();
+
+      logger.info('AI energy recommendations generated', {
+        energyId: energyId,
+        count: recommendations.recommendations?.length || 0
+      });
+
+      return recommendations;
+    } catch (error) {
+      logger.error('Error generating AI recommendations:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 🟡 تحليل الأثر المالي لتوفير الطاقة
+   * يستدعي AI Service لحساب التوفير المالي وتقليل الكربون
+   */
+  async analyzeEnergyFinancialImpact(energyId, companyId, options = {}) {
+    try {
+      const energy = await this.repository.findById(energyId, companyId);
+      if (!energy) {
+        throw new NotFoundError('Energy record not found');
+      }
+
+      const data = {
+        energyId: energy._id,
+        currentConsumption: energy.consumption?.total || 0,
+        currentCost: energy.cost?.total || 0,
+        estimatedSavings: options.estimatedSavings || energy.consumption?.total * 0.15,
+        estimatedCost: options.estimatedCost || 10000,
+        energyPrice: options.energyPrice || 0.15, // دولار لكل كيلوواط
+        timeframe: options.timeframe || 5 // سنوات
+      };
+
+      const analysis = await aiService.analyzeFinancialImpact(data);
+
+      logger.info('Energy financial impact analysis completed', {
+        energyId: energyId,
+        savings: analysis.savings,
+        roi: analysis.roi
+      });
+
+      return analysis;
+    } catch (error) {
+      logger.error('Error analyzing energy financial impact:', error);
       throw error;
     }
   }

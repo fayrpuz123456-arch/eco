@@ -1,9 +1,15 @@
 const mongoose = require('mongoose');
+const BaseModel = require('../../../core/base/BaseModel');
 
 // ============ USER SCHEMA ============
 
+// استخدام BaseModel لإضافة الحقول الأساسية (companyId, deletedAt, createdBy, updatedBy, status, metadata)
+// ولكننا نحتفظ بالحقول المخصصة لأن User Model معقد
 const userSchema = new mongoose.Schema({
-  // ===== Base Fields =====
+  // ===== Base Fields (من BaseModel) =====
+  // companyId, createdBy, updatedBy, createdAt, updatedAt, deletedAt, status, metadata
+  // تم تعريفها يدوياً هنا للحفاظ على التحكم الكامل
+
   companyId: { type: String, required: true, default: 'comp_test_001' },
   createdBy: { type: String },
   updatedBy: { type: String },
@@ -20,7 +26,6 @@ const userSchema = new mongoose.Schema({
   email: {
     type: String,
     required: true,
-    unique: true,
     lowercase: true,
     trim: true,
     match: /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -63,7 +68,6 @@ const userSchema = new mongoose.Schema({
   firebaseUid: {
     type: String,
     required: true,
-    unique: true,
     default: () => `firebase_${Date.now()}`
   },
   emailVerified: {
@@ -207,13 +211,13 @@ const userSchema = new mongoose.Schema({
     default: {}
   },
 
-  // ===== Metadata =====
+  // ===== Metadata (من BaseModel) =====
   metadata: {
     type: mongoose.Schema.Types.Mixed,
     default: {}
   },
 
-  // ===== Soft Delete =====
+  // ===== Soft Delete (من BaseModel) =====
   deletedBy: {
     type: String,
     default: null
@@ -242,11 +246,10 @@ const userSchema = new mongoose.Schema({
 });
 
 // ============ INDEXES ============
-// تم إزالة الفهارس المكررة - كل فهرس موجود مرة واحدة فقط
+// ✅ كل فهرس معرف مرة واحدة فقط
 
+// ✅ فهارس بسيطة للبحث
 userSchema.index({ companyId: 1 });
-userSchema.index({ email: 1, companyId: 1 }, { unique: true });
-userSchema.index({ firebaseUid: 1 });
 userSchema.index({ role: 1 });
 userSchema.index({ status: 1 });
 userSchema.index({ factoryIds: 1 });
@@ -254,6 +257,12 @@ userSchema.index({ departmentIds: 1 });
 userSchema.index({ 'preferences.language': 1 });
 userSchema.index({ createdAt: -1 });
 userSchema.index({ lastLogin: -1 });
+
+// ✅ فهارس فريدة (Unique)
+userSchema.index({ email: 1, companyId: 1 }, { unique: true });
+userSchema.index({ firebaseUid: 1 }, { unique: true });
+
+// ✅ فهرس Soft Delete
 userSchema.index({ deletedAt: 1 }, { sparse: true });
 
 // ============ VIRTUALS ============
@@ -442,6 +451,24 @@ userSchema.methods.toPublicJSON = function() {
   };
 };
 
+userSchema.methods.toAdminJSON = function() {
+  return {
+    ...this.toPublicJSON(),
+    phoneNumber: this.phoneNumber,
+    bio: this.bio,
+    firebaseUid: this.firebaseUid,
+    twoFactorEnabled: this.twoFactorEnabled,
+    loginCount: this.loginCount,
+    lastActive: this.lastActive,
+    lastIP: this.lastIP,
+    lastUserAgent: this.lastUserAgent,
+    metadata: this.metadata,
+    deletedAt: this.deletedAt,
+    deletedBy: this.deletedBy,
+    deletedReason: this.deletedReason
+  };
+};
+
 // ============ STATIC METHODS ============
 
 userSchema.statics.findByEmail = function(email, companyId) {
@@ -577,23 +604,19 @@ userSchema.statics.getStats = async function(companyId) {
   };
 };
 
-// ============ MIDDLEWARE ============
+// ============ PRE-SAVE MIDDLEWARE (محذوف - BaseModel بيتعامل مع updatedAt) ============
 
-userSchema.pre('save', function(next) {
-  this.updatedAt = new Date();
-  if (this.email) {
-    this.email = this.email.toLowerCase().trim();
+// ============ POST-SAVE MIDDLEWARE (Mongoose 9.7.4) ============
+
+userSchema.post('save', function(doc) {
+  console.log('✅ User saved successfully:', doc._id);
+});
+
+userSchema.post('save', function(error, doc, next) {
+  if (error) {
+    console.error('❌ Error saving user:', error.message);
   }
-  if (this.displayName) {
-    this.displayName = this.displayName.trim();
-  }
-  if (this.firstName) {
-    this.firstName = this.firstName.trim();
-  }
-  if (this.lastName) {
-    this.lastName = this.lastName.trim();
-  }
-  next();
+  next(error);
 });
 
 // ============ EXPORT ============

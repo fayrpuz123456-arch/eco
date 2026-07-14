@@ -1,4 +1,3 @@
- 
 const BaseService = require('../../../core/base/BaseService');
 const UserRepository = require('../repositories/UserRepository');
 const {
@@ -68,7 +67,23 @@ class UserService extends BaseService {
       // 6. إنشاء المستخدم في قاعدة البيانات
       const user = await this.repository.create(userData);
 
-      // 7. إرسال حدث
+      // 7. ✅ تحديث Firebase Claims تلقائياً
+      try {
+        await firebaseService.setCustomClaims(firebaseUser.uid, {
+          role: data.role || 'employee',
+          companyId: companyId,
+          permissions: data.permissions || []
+        });
+        logger.info('Firebase claims updated for new user', {
+          userId: user._id,
+          role: data.role || 'employee'
+        });
+      } catch (claimsError) {
+        logger.warn('Failed to set Firebase claims:', claimsError.message);
+        // مش مشكلة كبيرة، لأن Auth Middleware هيسحب من MongoDB
+      }
+
+      // 8. إرسال حدث
       eventEmitter.emit(EventTypes.USER_CREATED, {
         userId: user._id,
         email: user.email,
@@ -76,14 +91,14 @@ class UserService extends BaseService {
         createdBy: userId
       });
 
-      // 8. تسجيل العملية
+      // 9. تسجيل العملية
       logger.info('User created successfully', {
         userId: user._id,
         email: user.email,
         companyId
       });
 
-      // 9. إرجاع المستخدم مع كلمة المرور المؤقتة (إذا كانت جديدة)
+      // 10. إرجاع المستخدم مع كلمة المرور المؤقتة (إذا كانت جديدة)
       const result = user.toJSON ? user.toJSON() : user;
       if (!data.password) {
         result.temporaryPassword = password;
@@ -216,7 +231,7 @@ class UserService extends BaseService {
       const allowedUpdates = [
         'displayName', 'firstName', 'lastName', 'profilePicture',
         'phoneNumber', 'bio', 'preferences', 'emailVerified',
-        'status', 'role', 'permissions'
+        'status', 'role', 'permissions', 'firebaseUid'
       ];
 
       const updateData = {};
@@ -255,7 +270,26 @@ class UserService extends BaseService {
       // 7. تحديث المستخدم
       const updatedUser = await this.repository.update(id, updateData, companyId);
 
-      // 8. إرسال حدث
+      // 8. ✅ تحديث Firebase Claims إذا تغير الـ Role أو الـ Permissions
+      if (data.role || data.permissions) {
+        try {
+          await firebaseService.setCustomClaims(updatedUser.firebaseUid, {
+            role: updatedUser.role || existingUser.role,
+            companyId: updatedUser.companyId || existingUser.companyId,
+            factoryIds: updatedUser.factoryIds || existingUser.factoryIds || [],
+            departmentIds: updatedUser.departmentIds || existingUser.departmentIds || [],
+            permissions: updatedUser.permissions || existingUser.permissions || []
+          });
+          logger.info('Firebase claims updated for user', {
+            userId: id,
+            role: updatedUser.role || existingUser.role
+          });
+        } catch (claimsError) {
+          logger.warn('Failed to update Firebase claims:', claimsError.message);
+        }
+      }
+
+      // 9. إرسال حدث
       eventEmitter.emit(EventTypes.USER_UPDATED, {
         userId: updatedUser._id,
         email: updatedUser.email,
@@ -263,7 +297,7 @@ class UserService extends BaseService {
         updatedBy: userId
       });
 
-      // 9. تسجيل العملية
+      // 10. تسجيل العملية
       logger.info('User updated successfully', {
         userId: updatedUser._id,
         email: updatedUser.email,
@@ -346,14 +380,24 @@ class UserService extends BaseService {
 
       const updatedUser = await this.repository.updateRole(id, role, companyId);
 
-      // تحديث الصلاحيات المخصصة في Firebase
-      await firebaseService.setCustomClaims(user.firebaseUid, {
-        role,
-        companyId: user.companyId,
-        factoryIds: user.factoryIds || [],
-        departmentIds: user.departmentIds || [],
-        permissions: user.permissions || []
-      });
+      // ✅ تحديث الصلاحيات المخصصة في Firebase
+      try {
+        await firebaseService.setCustomClaims(user.firebaseUid, {
+          role,
+          companyId: user.companyId,
+          factoryIds: user.factoryIds || [],
+          departmentIds: user.departmentIds || [],
+          permissions: user.permissions || []
+        });
+        logger.info('Firebase claims updated for role change', {
+          userId: id,
+          oldRole: user.role,
+          newRole: role
+        });
+      } catch (claimsError) {
+        logger.warn('Failed to update Firebase claims for role:', claimsError.message);
+        // مش مشكلة كبيرة، لأن Auth Middleware هيسحب من MongoDB
+      }
 
       logger.info('User role updated', {
         userId: id,
@@ -391,14 +435,22 @@ class UserService extends BaseService {
 
       const updatedUser = await this.repository.updatePermissions(id, permissions, companyId);
 
-      // تحديث الصلاحيات في Firebase
-      await firebaseService.setCustomClaims(user.firebaseUid, {
-        role: user.role,
-        companyId: user.companyId,
-        factoryIds: user.factoryIds || [],
-        departmentIds: user.departmentIds || [],
-        permissions
-      });
+      // ✅ تحديث الصلاحيات في Firebase
+      try {
+        await firebaseService.setCustomClaims(user.firebaseUid, {
+          role: user.role,
+          companyId: user.companyId,
+          factoryIds: user.factoryIds || [],
+          departmentIds: user.departmentIds || [],
+          permissions
+        });
+        logger.info('Firebase claims updated for permissions', {
+          userId: id,
+          permissionsCount: permissions.length
+        });
+      } catch (claimsError) {
+        logger.warn('Failed to update Firebase claims for permissions:', claimsError.message);
+      }
 
       logger.info('User permissions updated', {
         userId: id,

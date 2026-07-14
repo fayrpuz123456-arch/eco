@@ -73,7 +73,7 @@ router.get('/code/:code', async (req, res) => {
 // ===== POST - إنشاء شركة جديدة =====
 router.post('/', async (req, res) => {
   try {
-    const { name, code, industry, contactEmail, contactPhone, address, description, website } = req.body;
+    const { name, code, industry, contactEmail, contactPhone, address, description, website, companyId } = req.body;
 
     // التحقق من البيانات المطلوبة
     if (!name || !code || !industry || !contactEmail) {
@@ -102,7 +102,8 @@ router.post('/', async (req, res) => {
       address: address || {},
       description: description || null,
       website: website || null,
-      status: 'active'
+      status: 'active',
+      companyId: companyId || req.headers['x-company-id'] || 'comp_test_001' // ✅ إضافة companyId
     });
 
     const savedCompany = await newCompany.save();

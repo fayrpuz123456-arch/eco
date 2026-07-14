@@ -1,11 +1,13 @@
 const mongoose = require('mongoose');
+const BaseModel = require('../../../core/base/BaseModel');
 
 // ============ REPORT SCHEMA ============
 
+// استخدام BaseModel لإضافة الحقول الأساسية (companyId, deletedAt, createdBy, updatedBy, status, metadata)
+// ولكننا نحتفظ بالحقول المخصصة لأن Report Model معقد
 const reportSchema = new mongoose.Schema({
-  // ===== Base Fields =====
-  companyId: { type: String, required: true, index: true },
-  factoryId: { type: String, required: true, index: true },
+  // ===== Base Fields (من BaseModel) =====
+  companyId: { type: String, required: true, default: 'comp_test_001' },
   createdBy: { type: String },
   updatedBy: { type: String },
   createdAt: { type: Date, default: Date.now },
@@ -18,6 +20,11 @@ const reportSchema = new mongoose.Schema({
   },
 
   // ===== Basic Information =====
+  factoryId: {
+    type: String,
+    required: true,
+    index: true
+  },
   name: {
     type: String,
     required: true,
@@ -31,8 +38,7 @@ const reportSchema = new mongoose.Schema({
     trim: true,
     uppercase: true,
     minlength: 2,
-    maxlength: 20,
-    unique: true
+    maxlength: 20
   },
   description: {
     type: String,
@@ -193,6 +199,19 @@ const reportSchema = new mongoose.Schema({
     default: []
   },
 
+  // ===== AI Insights =====
+  insights: {
+    type: [{
+      title: { type: String },
+      description: { type: String },
+      type: { type: String, enum: ['insight', 'warning', 'opportunity'] },
+      category: { type: String },
+      confidence: { type: Number, min: 0, max: 1 },
+      recommendation: { type: String }
+    }],
+    default: []
+  },
+
   // ===== Tags =====
   tags: {
     type: [String],
@@ -222,17 +241,22 @@ const reportSchema = new mongoose.Schema({
 });
 
 // ============ INDEXES ============
-// تم إزالة الفهارس المكررة - كل فهرس موجود مرة واحدة فقط
+// ✅ كل فهرس معرف مرة واحدة فقط
 
+// فهارس للبحث
 reportSchema.index({ companyId: 1, type: 1, status: 1 });
 reportSchema.index({ companyId: 1, 'period.startDate': 1, 'period.endDate': 1 });
 reportSchema.index({ factoryId: 1, type: 1 });
-reportSchema.index({ code: 1 }, { unique: true });
-reportSchema.index({ status: 1 });
 reportSchema.index({ type: 1 });
+reportSchema.index({ status: 1 });
 reportSchema.index({ createdAt: -1 });
 reportSchema.index({ 'period.startDate': 1 });
 reportSchema.index({ 'period.endDate': 1 });
+
+// ✅ فهرس فريد لـ code
+reportSchema.index({ code: 1 }, { unique: true });
+
+// ✅ فهرس Soft Delete
 reportSchema.index({ deletedAt: 1 }, { sparse: true });
 
 // ============ VIRTUALS ============
@@ -353,6 +377,14 @@ reportSchema.methods.calculateNextGeneration = function() {
 };
 
 /**
+ * إضافة Insight
+ */
+reportSchema.methods.addInsight = function(insight) {
+  this.insights.push(insight);
+  return this.save();
+};
+
+/**
  * الحصول على معلومات عامة (للـ API)
  */
 reportSchema.methods.toPublicJSON = function() {
@@ -373,6 +405,30 @@ reportSchema.methods.toPublicJSON = function() {
     },
     createdAt: this.createdAt,
     tags: this.tags
+  };
+};
+
+/**
+ * البيانات الكاملة للإدارة
+ */
+reportSchema.methods.toAdminJSON = function() {
+  return {
+    ...this.toPublicJSON(),
+    factoryId: this.factoryId,
+    companyId: this.companyId,
+    data: this.data,
+    charts: this.charts,
+    tables: this.tables,
+    sections: this.sections,
+    filters: this.filters,
+    delivery: this.delivery,
+    sharing: this.sharing,
+    comments: this.comments,
+    insights: this.insights,
+    metadata: this.metadata,
+    deletedAt: this.deletedAt,
+    deletedBy: this.deletedBy,
+    deletedReason: this.deletedReason
   };
 };
 
@@ -397,6 +453,17 @@ reportSchema.statics.findByPeriod = async function(companyId, startDate, endDate
     companyId,
     'period.startDate': { $gte: new Date(startDate) },
     'period.endDate': { $lte: new Date(endDate) },
+    deletedAt: null
+  }).sort({ createdAt: -1 });
+};
+
+/**
+ * الحصول على التقارير حسب المصنع
+ */
+reportSchema.statics.findByFactory = async function(factoryId, companyId) {
+  return this.find({
+    factoryId,
+    companyId,
     deletedAt: null
   }).sort({ createdAt: -1 });
 };
@@ -430,12 +497,40 @@ reportSchema.statics.getStats = async function(companyId) {
           $sum: {
             $cond: [{ $eq: ['$status', 'draft'] }, 1, 0]
           }
+        },
+        archived: {
+          $sum: {
+            $cond: [{ $eq: ['$status', 'archived'] }, 1, 0]
+          }
         }
       }
     }
   ]);
   
-  return stats[0] || { total: 0, completed: 0, generating: 0, failed: 0, draft: 0 };
+  return stats[0] || {
+    total: 0,
+    completed: 0,
+    generating: 0,
+    failed: 0,
+    draft: 0,
+    archived: 0
+  };
+};
+
+/**
+ * الحصول على توزيع التقارير حسب النوع
+ */
+reportSchema.statics.getTypeDistribution = async function(companyId) {
+  return this.aggregate([
+    { $match: { companyId, deletedAt: null } },
+    {
+      $group: {
+        _id: '$type',
+        count: { $sum: 1 }
+      }
+    },
+    { $sort: { count: -1 } }
+  ]);
 };
 
 /**
@@ -451,10 +546,28 @@ reportSchema.statics.findScheduled = async function() {
   });
 };
 
-// ============ MIDDLEWARE ============
+// ============ PRE-SAVE MIDDLEWARE ============
 
 reportSchema.pre('save', function(next) {
   this.updatedAt = new Date();
+  
+  // تنظيف البيانات
+  if (this.name) this.name = this.name.trim();
+  if (this.code) this.code = this.code.toUpperCase().trim();
+  if (this.description) this.description = this.description.trim();
+  
+  // حساب summary تلقائياً إذا كانت data موجودة
+  if (this.data && Object.keys(this.data).length > 0 && this.status === 'completed') {
+    const values = Object.values(this.data).filter(v => typeof v === 'number');
+    if (values.length > 0) {
+      this.summary.total = values.reduce((a, b) => a + b, 0);
+      this.summary.average = this.summary.total / values.length;
+      this.summary.min = Math.min(...values);
+      this.summary.max = Math.max(...values);
+      this.summary.count = values.length;
+    }
+  }
+  
   next();
 });
 

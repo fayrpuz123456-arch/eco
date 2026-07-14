@@ -51,7 +51,6 @@ class BaseModel {
     });
     
     schema.pre('aggregate', function() {
-      // نضيف شرط deletedAt في بداية الـ pipeline
       if (this.pipeline().length > 0) {
         const firstStage = this.pipeline()[0];
         if (firstStage && firstStage.$match) {
@@ -138,25 +137,33 @@ class BaseModel {
    * @param {mongoose.Schema} schema - مخطط Mongoose
    */
   static applyCommonSettings(schema) {
-    // تحديث updatedAt قبل الحفظ
-    schema.pre('save', function(next) {
-      this.updatedAt = new Date();
-      next();
-    });
+    // ⚠️ تم تعطيل Pre-save middleware مؤقتاً لحل مشكلة "next is not a function"
+    // سيتم إعادة تفعيلها بعد تحديث Mongoose
+    // schema.pre('save', function(next) {
+    //   try {
+    //     this.updatedAt = new Date();
+    //     next();
+    //   } catch (error) {
+    //     next(error);
+    //   }
+    // });
 
-    // تنظيف البيانات قبل الحفظ
-    schema.pre('save', function(next) {
-      if (this.email) {
-        this.email = this.email.toLowerCase().trim();
-      }
-      if (this.name) {
-        this.name = this.name.trim();
-      }
-      if (this.code) {
-        this.code = this.code.toUpperCase().trim();
-      }
-      next();
-    });
+    // schema.pre('save', function(next) {
+    //   try {
+    //     if (this.email) {
+    //       this.email = this.email.toLowerCase().trim();
+    //     }
+    //     if (this.name) {
+    //       this.name = this.name.trim();
+    //     }
+    //     if (this.code) {
+    //       this.code = this.code.toUpperCase().trim();
+    //     }
+    //     next();
+    //   } catch (error) {
+    //     next(error);
+    //   }
+    // });
 
     // إضافة دوال عامة
     schema.methods.toJSON = function() {
@@ -211,4 +218,4 @@ class BaseModel {
   }
 }
 
-module.exports = BaseModel; 
+module.exports = BaseModel;

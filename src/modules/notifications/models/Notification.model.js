@@ -1,11 +1,13 @@
 const mongoose = require('mongoose');
+const BaseModel = require('../../../core/base/BaseModel');
 
 // ============ NOTIFICATION SCHEMA ============
 
+// استخدام BaseModel لإضافة الحقول الأساسية (companyId, deletedAt, createdBy, updatedBy, status, metadata)
+// ولكننا نحتفظ بالحقول المخصصة لأن Notification Model معقد
 const notificationSchema = new mongoose.Schema({
-  // ===== Base Fields =====
-  companyId: { type: String, required: true, index: true },
-  userId: { type: String, required: true, index: true },
+  // ===== Base Fields (من BaseModel) =====
+  companyId: { type: String, required: true, default: 'comp_test_001' },
   createdBy: { type: String },
   updatedBy: { type: String },
   createdAt: { type: Date, default: Date.now },
@@ -18,6 +20,11 @@ const notificationSchema = new mongoose.Schema({
   },
 
   // ===== Notification Content =====
+  userId: {
+    type: String,
+    required: true,
+    index: true
+  },
   title: {
     type: String,
     required: true,
@@ -177,18 +184,24 @@ const notificationSchema = new mongoose.Schema({
 });
 
 // ============ INDEXES ============
-// تم إزالة الفهارس المكررة - كل فهرس موجود مرة واحدة فقط
+// ✅ كل فهرس معرف مرة واحدة فقط
 
+// فهارس للبحث
 notificationSchema.index({ companyId: 1, userId: 1, status: 1 });
 notificationSchema.index({ userId: 1, createdAt: -1 });
 notificationSchema.index({ companyId: 1, status: 1, createdAt: -1 });
-notificationSchema.index({ userId: 1 });
-notificationSchema.index({ status: 1 });
 notificationSchema.index({ type: 1 });
 notificationSchema.index({ category: 1 });
 notificationSchema.index({ priority: 1 });
 notificationSchema.index({ scheduledAt: 1 });
 notificationSchema.index({ createdAt: -1 });
+
+// ✅ تم إزالة indexes التالية لأنها معرفة بالفعل في الحقول أو BaseModel:
+// - userId (معرف في الحقل)
+// - status (معرف في الحقل)
+// - deletedAt (معرف في BaseModel مع sparse: true)
+
+// ✅ فهرس Soft Delete
 notificationSchema.index({ deletedAt: 1 }, { sparse: true });
 
 // ============ VIRTUALS ============
@@ -277,6 +290,23 @@ notificationSchema.methods.toPublicJSON = function() {
   };
 };
 
+notificationSchema.methods.toAdminJSON = function() {
+  return {
+    ...this.toPublicJSON(),
+    userId: this.userId,
+    companyId: this.companyId,
+    recipients: this.recipients,
+    delivery: this.delivery,
+    feedback: this.feedback,
+    template: this.template,
+    tags: this.tags,
+    metadata: this.metadata,
+    deletedAt: this.deletedAt,
+    deletedBy: this.deletedBy,
+    deletedReason: this.deletedReason
+  };
+};
+
 // ============ STATIC METHODS ============
 
 /**
@@ -321,7 +351,37 @@ notificationSchema.statics.findUnread = async function(userId) {
 };
 
 /**
- * الحصول على إحصائيات الإشعارات
+ * الحصول على إشعارات الشركة
+ */
+notificationSchema.statics.findByCompany = async function(companyId, options = {}) {
+  const { limit = 50, page = 1, status, type } = options;
+  const query = { companyId, deletedAt: null };
+  if (status) query.status = status;
+  if (type) query.type = type;
+  
+  const skip = (page - 1) * limit;
+  
+  const [data, total] = await Promise.all([
+    this.find(query)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit),
+    this.countDocuments(query)
+  ]);
+  
+  return {
+    data,
+    meta: {
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit)
+    }
+  };
+};
+
+/**
+ * الحصول على إحصائيات الإشعارات للمستخدم
  */
 notificationSchema.statics.getStats = async function(userId) {
   const stats = await this.aggregate([
@@ -352,6 +412,42 @@ notificationSchema.statics.getStats = async function(userId) {
 };
 
 /**
+ * الحصول على إحصائيات الإشعارات للشركة
+ */
+notificationSchema.statics.getCompanyStats = async function(companyId) {
+  const stats = await this.aggregate([
+    { $match: { companyId, deletedAt: null } },
+    {
+      $group: {
+        _id: null,
+        total: { $sum: 1 },
+        unread: {
+          $sum: {
+            $cond: [
+              { $in: ['$status', ['sent', 'delivered', 'pending']] },
+              1,
+              0
+            ]
+          }
+        },
+        read: {
+          $sum: {
+            $cond: [{ $eq: ['$status', 'read'] }, 1, 0]
+          }
+        },
+        failed: {
+          $sum: {
+            $cond: [{ $eq: ['$status', 'failed'] }, 1, 0]
+          }
+        }
+      }
+    }
+  ]);
+  
+  return stats[0] || { total: 0, unread: 0, read: 0, failed: 0 };
+};
+
+/**
  * وضع علامة كمقروءة لكل الإشعارات
  */
 notificationSchema.statics.markAllAsRead = async function(userId) {
@@ -369,10 +465,34 @@ notificationSchema.statics.markAllAsRead = async function(userId) {
   );
 };
 
-// ============ MIDDLEWARE ============
+/**
+ * الحصول على الإشعارات المجدولة
+ */
+notificationSchema.statics.findScheduled = async function() {
+  const now = new Date();
+  return this.find({
+    scheduledAt: { $lte: now },
+    isScheduled: true,
+    status: { $in: ['pending', 'sent'] },
+    deletedAt: null
+  }).sort({ scheduledAt: 1 });
+};
+
+// ============ PRE-SAVE MIDDLEWARE ============
 
 notificationSchema.pre('save', function(next) {
   this.updatedAt = new Date();
+  
+  // تنظيف البيانات
+  if (this.title) this.title = this.title.trim();
+  if (this.message) this.message = this.message.trim();
+  if (this.body) this.body = this.body.trim();
+  
+  // إذا كان مجدولاً وغير مرسل، الحالة pending
+  if (this.scheduledAt && this.status === 'pending') {
+    this.isScheduled = true;
+  }
+  
   next();
 });
 

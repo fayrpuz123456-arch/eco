@@ -2,10 +2,9 @@ const express = require('express');
 const router = express.Router();
 const ProductionLineController = require('../controllers/ProductionLineController');
 const { validate } = require('../../../core/middleware/validation');
-const authMiddleware = require('../../../core/middleware/auth');
+const { authMiddleware } = require('../../../core/middleware/auth');
 const { tenantMiddleware } = require('../../../core/middleware/tenant');
-const { checkPermissions, checkRole } = require('../../../core/middleware/permissions');
-const { PERMISSIONS } = require('../../../core/middleware/permissions');
+const { checkPermissions, checkRole, PERMISSIONS } = require('../../../core/middleware/permissions');
 const { idSchema } = require('../../../core/middleware/validation');
 const Joi = require('joi');
 
@@ -23,8 +22,8 @@ const createProductionLineSchema = Joi.object({
   category: Joi.string().valid('manual', 'semi_automated', 'fully_automated', 'robotic', 'hybrid')
     .default('semi_automated'),
   priority: Joi.string().valid('low', 'medium', 'high', 'critical').default('medium'),
-  departmentId: Joi.string().uuid({ version: 'uuidv4' }).required(),
-  factoryId: Joi.string().uuid({ version: 'uuidv4' }).required(),
+  departmentId: Joi.string().required(), // ✅ تم إزالة uuid validation
+  factoryId: Joi.string().required(), // ✅ تم إزالة uuid validation
   tags: Joi.array().items(Joi.string()).default([])
 });
 
@@ -51,6 +50,43 @@ const updateGreenScoreSchema = Joi.object({
   score: Joi.number().min(0).max(100).required()
 });
 
+const updateMachinesSchema = Joi.object({
+  total: Joi.number().min(0).optional(),
+  active: Joi.number().min(0).optional(),
+  idle: Joi.number().min(0).optional(),
+  maintenance: Joi.number().min(0).optional(),
+  offline: Joi.number().min(0).optional(),
+  machineIds: Joi.array().items(Joi.string()).optional() // ✅ تم إزالة uuid validation
+});
+
+const updateSensorsSchema = Joi.object({
+  total: Joi.number().min(0).optional(),
+  active: Joi.number().min(0).optional(),
+  offline: Joi.number().min(0).optional(),
+  sensorIds: Joi.array().items(Joi.string()).optional() // ✅ تم إزالة uuid validation
+});
+
+const updateQualitySchema = Joi.object({
+  totalProduced: Joi.number().min(0).optional(),
+  totalDefects: Joi.number().min(0).optional(),
+  totalScrap: Joi.number().min(0).optional(),
+  totalRework: Joi.number().min(0).optional(),
+  defectRate: Joi.number().min(0).max(100).optional(),
+  qualityScore: Joi.number().min(0).max(100).optional(),
+  lastInspection: Joi.date().iso().optional(),
+  nextInspection: Joi.date().iso().optional()
+});
+
+const updateCostSchema = Joi.object({
+  laborCost: Joi.number().min(0).optional(),
+  materialCost: Joi.number().min(0).optional(),
+  energyCost: Joi.number().min(0).optional(),
+  maintenanceCost: Joi.number().min(0).optional(),
+  totalCost: Joi.number().min(0).optional(),
+  costPerUnit: Joi.number().min(0).optional(),
+  currency: Joi.string().optional()
+});
+
 const filterSchema = Joi.object({
   page: Joi.number().integer().min(1).default(1),
   limit: Joi.number().integer().min(1).max(100).default(10),
@@ -62,7 +98,7 @@ const filterSchema = Joi.object({
   ),
   category: Joi.string().valid('manual', 'semi_automated', 'fully_automated', 'robotic', 'hybrid'),
   priority: Joi.string().valid('low', 'medium', 'high', 'critical'),
-  departmentId: Joi.string().uuid({ version: 'uuidv4' }),
+  departmentId: Joi.string(), // ✅ تم إزالة uuid validation
   minOEE: Joi.number().min(0).max(100),
   maxOEE: Joi.number().min(0).max(100),
   minGreenScore: Joi.number().min(0).max(100),
@@ -119,6 +155,7 @@ router.get(
  */
 router.get(
   '/department/:departmentId',
+  validate(Joi.object({ departmentId: Joi.string().required() }), 'params'), // ✅ تم إزالة uuid validation
   checkPermissions([PERMISSIONS.PRODUCTION_LINES_VIEW]),
   controller.getByDepartment.bind(controller)
 );
@@ -130,6 +167,7 @@ router.get(
  */
 router.get(
   '/department/:departmentId/active',
+  validate(Joi.object({ departmentId: Joi.string().required() }), 'params'),
   checkPermissions([PERMISSIONS.PRODUCTION_LINES_VIEW]),
   controller.getActive.bind(controller)
 );
@@ -141,6 +179,7 @@ router.get(
  */
 router.get(
   '/department/:departmentId/high-performance',
+  validate(Joi.object({ departmentId: Joi.string().required() }), 'params'),
   checkPermissions([PERMISSIONS.PRODUCTION_LINES_VIEW]),
   controller.getHighPerformance.bind(controller)
 );
@@ -152,6 +191,7 @@ router.get(
  */
 router.get(
   '/department/:departmentId/stats',
+  validate(Joi.object({ departmentId: Joi.string().required() }), 'params'),
   checkPermissions([PERMISSIONS.PRODUCTION_LINES_VIEW]),
   controller.getDepartmentStats.bind(controller)
 );
@@ -163,6 +203,7 @@ router.get(
  */
 router.get(
   '/department/:departmentId/distribution/type',
+  validate(Joi.object({ departmentId: Joi.string().required() }), 'params'),
   checkPermissions([PERMISSIONS.PRODUCTION_LINES_VIEW]),
   controller.getTypeDistribution.bind(controller)
 );
@@ -174,6 +215,7 @@ router.get(
  */
 router.get(
   '/department/:departmentId/distribution/category',
+  validate(Joi.object({ departmentId: Joi.string().required() }), 'params'),
   checkPermissions([PERMISSIONS.PRODUCTION_LINES_VIEW]),
   controller.getCategoryDistribution.bind(controller)
 );
@@ -185,6 +227,7 @@ router.get(
  */
 router.get(
   '/factory/:factoryId',
+  validate(Joi.object({ factoryId: Joi.string().required() }), 'params'), // ✅ تم إزالة uuid validation
   checkPermissions([PERMISSIONS.PRODUCTION_LINES_VIEW]),
   controller.getByFactory.bind(controller)
 );
@@ -198,7 +241,7 @@ router.get(
   '/search',
   validate(Joi.object({ 
     query: Joi.string().min(2).required(),
-    departmentId: Joi.string().uuid({ version: 'uuidv4' }).optional()
+    departmentId: Joi.string().optional()
   }), 'query'),
   checkPermissions([PERMISSIONS.PRODUCTION_LINES_VIEW]),
   controller.search.bind(controller)
@@ -223,6 +266,10 @@ router.get(
  */
 router.get(
   '/code/:code/department/:departmentId',
+  validate(Joi.object({ 
+    code: Joi.string().min(2).max(10).uppercase().required(),
+    departmentId: Joi.string().required()
+  }), 'params'),
   checkPermissions([PERMISSIONS.PRODUCTION_LINES_VIEW]),
   controller.getByCode.bind(controller)
 );
@@ -234,7 +281,7 @@ router.get(
  */
 router.get(
   '/:id',
-  validate(Joi.object({ id: idSchema }), 'params'),
+  validate(Joi.object({ id: Joi.string().required() }), 'params'),
   checkPermissions([PERMISSIONS.PRODUCTION_LINES_VIEW]),
   controller.getById.bind(controller)
 );
@@ -246,7 +293,7 @@ router.get(
  */
 router.get(
   '/:id/stats',
-  validate(Joi.object({ id: idSchema }), 'params'),
+  validate(Joi.object({ id: Joi.string().required() }), 'params'),
   checkPermissions([PERMISSIONS.PRODUCTION_LINES_VIEW]),
   controller.getStats.bind(controller)
 );
@@ -258,7 +305,7 @@ router.get(
  */
 router.get(
   '/:id/dashboard',
-  validate(Joi.object({ id: idSchema }), 'params'),
+  validate(Joi.object({ id: Joi.string().required() }), 'params'),
   checkPermissions([PERMISSIONS.PRODUCTION_LINES_VIEW]),
   controller.getDashboard.bind(controller)
 );
@@ -284,7 +331,7 @@ router.post(
  */
 router.put(
   '/:id',
-  validate(Joi.object({ id: idSchema }), 'params'),
+  validate(Joi.object({ id: Joi.string().required() }), 'params'),
   validate(updateProductionLineSchema),
   checkPermissions([PERMISSIONS.PRODUCTION_LINES_UPDATE]),
   controller.update.bind(controller)
@@ -297,7 +344,7 @@ router.put(
  */
 router.put(
   '/:id/status',
-  validate(Joi.object({ id: idSchema }), 'params'),
+  validate(Joi.object({ id: Joi.string().required() }), 'params'),
   validate(updateStatusSchema),
   checkPermissions([PERMISSIONS.PRODUCTION_LINES_UPDATE]),
   controller.updateStatus.bind(controller)
@@ -310,7 +357,7 @@ router.put(
  */
 router.put(
   '/:id/performance',
-  validate(Joi.object({ id: idSchema }), 'params'),
+  validate(Joi.object({ id: Joi.string().required() }), 'params'),
   validate(updatePerformanceSchema),
   checkPermissions([PERMISSIONS.PRODUCTION_LINES_UPDATE]),
   controller.updatePerformance.bind(controller)
@@ -323,8 +370,8 @@ router.put(
  */
 router.put(
   '/:id/machines',
-  validate(Joi.object({ id: idSchema }), 'params'),
-  validate(updatePerformanceSchema),
+  validate(Joi.object({ id: Joi.string().required() }), 'params'),
+  validate(updateMachinesSchema),
   checkPermissions([PERMISSIONS.PRODUCTION_LINES_UPDATE]),
   controller.updateMachines.bind(controller)
 );
@@ -336,8 +383,8 @@ router.put(
  */
 router.put(
   '/:id/sensors',
-  validate(Joi.object({ id: idSchema }), 'params'),
-  validate(updatePerformanceSchema),
+  validate(Joi.object({ id: Joi.string().required() }), 'params'),
+  validate(updateSensorsSchema),
   checkPermissions([PERMISSIONS.PRODUCTION_LINES_UPDATE]),
   controller.updateSensors.bind(controller)
 );
@@ -349,8 +396,8 @@ router.put(
  */
 router.put(
   '/:id/quality',
-  validate(Joi.object({ id: idSchema }), 'params'),
-  validate(updatePerformanceSchema),
+  validate(Joi.object({ id: Joi.string().required() }), 'params'),
+  validate(updateQualitySchema),
   checkPermissions([PERMISSIONS.PRODUCTION_LINES_UPDATE]),
   controller.updateQuality.bind(controller)
 );
@@ -362,7 +409,7 @@ router.put(
  */
 router.put(
   '/:id/green-score',
-  validate(Joi.object({ id: idSchema }), 'params'),
+  validate(Joi.object({ id: Joi.string().required() }), 'params'),
   validate(updateGreenScoreSchema),
   checkPermissions([PERMISSIONS.PRODUCTION_LINES_UPDATE]),
   controller.updateGreenScore.bind(controller)
@@ -375,8 +422,8 @@ router.put(
  */
 router.put(
   '/:id/cost',
-  validate(Joi.object({ id: idSchema }), 'params'),
-  validate(updatePerformanceSchema),
+  validate(Joi.object({ id: Joi.string().required() }), 'params'),
+  validate(updateCostSchema),
   checkPermissions([PERMISSIONS.PRODUCTION_LINES_UPDATE]),
   controller.updateCost.bind(controller)
 );
@@ -388,7 +435,7 @@ router.put(
  */
 router.post(
   '/:id/start',
-  validate(Joi.object({ id: idSchema }), 'params'),
+  validate(Joi.object({ id: Joi.string().required() }), 'params'),
   checkPermissions([PERMISSIONS.PRODUCTION_LINES_UPDATE]),
   controller.start.bind(controller)
 );
@@ -400,7 +447,7 @@ router.post(
  */
 router.post(
   '/:id/stop',
-  validate(Joi.object({ id: idSchema }), 'params'),
+  validate(Joi.object({ id: Joi.string().required() }), 'params'),
   checkPermissions([PERMISSIONS.PRODUCTION_LINES_UPDATE]),
   controller.stop.bind(controller)
 );
@@ -412,7 +459,7 @@ router.post(
  */
 router.post(
   '/:id/maintenance',
-  validate(Joi.object({ id: idSchema }), 'params'),
+  validate(Joi.object({ id: Joi.string().required() }), 'params'),
   validate(addMaintenanceRecordSchema),
   checkPermissions([PERMISSIONS.PRODUCTION_LINES_UPDATE]),
   controller.addMaintenanceRecord.bind(controller)
@@ -425,11 +472,12 @@ router.post(
  */
 router.delete(
   '/:id',
-  validate(Joi.object({ id: idSchema }), 'params'),
+  validate(Joi.object({ id: Joi.string().required() }), 'params'),
   validate(deleteProductionLineSchema),
   checkRole(['super_admin', 'admin']),
   checkPermissions([PERMISSIONS.PRODUCTION_LINES_DELETE]),
   controller.delete.bind(controller)
 );
 
+// ============ EXPORT ============
 module.exports = router;

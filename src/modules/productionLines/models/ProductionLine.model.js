@@ -4,23 +4,14 @@ const BaseModel = require('../../../core/base/BaseModel');
 
 // ============ PRODUCTION LINE SCHEMA ============
 
-const productionLineSchema = new mongoose.Schema({
-  // ===== Base Fields =====
-  _id: { type: String, default: () => uuidv4() },
-  companyId: { type: String, required: true, index: true },
+// استخدام BaseModel لإضافة الحقول الأساسية مع الاحتفاظ بالمخصصات
+const productionLineSchema = BaseModel.createSchema({
+  // ===== Base Fields (مضافة من BaseModel) =====
+  // companyId, createdBy, updatedBy, createdAt, updatedAt, deletedAt, status, metadata
+  
+  // ===== Additional Fields =====
   factoryId: { type: String, required: true, index: true },
   departmentId: { type: String, required: true, index: true },
-  createdBy: { type: String },
-  updatedBy: { type: String },
-  createdAt: { type: Date, default: Date.now },
-  updatedAt: { type: Date, default: Date.now },
-  deletedAt: { type: Date, default: null },
-  status: {
-    type: String,
-    enum: ['active', 'inactive', 'maintenance', 'stopped', 'archived'],
-    default: 'active',
-    index: true
-  },
 
   // ===== Basic Information =====
   name: {
@@ -48,19 +39,9 @@ const productionLineSchema = new mongoose.Schema({
   type: {
     type: String,
     enum: [
-      'assembly',          // التجميع
-      'packaging',         // التعبئة
-      'processing',        // المعالجة
-      'manufacturing',     // التصنيع
-      'filling',          // التعبئة السائلة
-      'cutting',          // القطع
-      'welding',          // اللحام
-      'painting',         // الدهان
-      'quality_control',  // مراقبة الجودة
-      'testing',          // الاختبار
-      'maintenance',      // الصيانة
-      'material_handling', // مناولة المواد
-      'other'            // أخرى
+      'assembly', 'packaging', 'processing', 'manufacturing',
+      'filling', 'cutting', 'welding', 'painting',
+      'quality_control', 'testing', 'maintenance', 'material_handling', 'other'
     ],
     required: true,
     index: true
@@ -113,19 +94,19 @@ const productionLineSchema = new mongoose.Schema({
     },
     lastStartTime: { type: Date, default: null },
     lastStopTime: { type: Date, default: null },
-    totalRunTime: { type: Number, default: 0, min: 0 }, // بالساعات
-    totalDowntime: { type: Number, default: 0, min: 0 } // بالساعات
+    totalRunTime: { type: Number, default: 0, min: 0 },
+    totalDowntime: { type: Number, default: 0, min: 0 }
   },
 
   // ===== Performance Metrics =====
   performance: {
-    oee: { type: Number, min: 0, max: 100, default: 0 }, // Overall Equipment Effectiveness
+    oee: { type: Number, min: 0, max: 100, default: 0 },
     availability: { type: Number, min: 0, max: 100, default: 0 },
     performance: { type: Number, min: 0, max: 100, default: 0 },
     quality: { type: Number, min: 0, max: 100, default: 0 },
     throughput: { type: Number, default: 0, min: 0 },
-    cycleTime: { type: Number, default: 0, min: 0 }, // بالثواني
-    changeoverTime: { type: Number, default: 0, min: 0 }, // بالدقائق
+    cycleTime: { type: Number, default: 0, min: 0 },
+    changeoverTime: { type: Number, default: 0, min: 0 },
     lastUpdated: { type: Date, default: Date.now }
   },
 
@@ -225,24 +206,36 @@ const productionLineSchema = new mongoose.Schema({
 
   // ===== Energy & Environment =====
   environmental: {
-    energyConsumption: { type: Number, default: 0, min: 0 }, // kWh
-    waterConsumption: { type: Number, default: 0, min: 0 }, // m³
-    wasteProduction: { type: Number, default: 0, min: 0 }, // kg
-    carbonFootprint: { type: Number, default: 0, min: 0 }, // kg CO2
+    energyConsumption: { type: Number, default: 0, min: 0 },
+    waterConsumption: { type: Number, default: 0, min: 0 },
+    wasteProduction: { type: Number, default: 0, min: 0 },
+    carbonFootprint: { type: Number, default: 0, min: 0 },
     greenScore: { type: Number, min: 0, max: 100, default: 0 },
     lastUpdated: { type: Date, default: Date.now }
   },
 
   // ===== Cost =====
   cost: {
-    laborCost: { type: Number, default: 0, min: 0 }, // بالساعة
-    materialCost: { type: Number, default: 0, min: 0 }, // لكل وحدة
-    energyCost: { type: Number, default: 0, min: 0 }, // لكل ساعة
-    maintenanceCost: { type: Number, default: 0, min: 0 }, // شهرياً
+    laborCost: { type: Number, default: 0, min: 0 },
+    materialCost: { type: Number, default: 0, min: 0 },
+    energyCost: { type: Number, default: 0, min: 0 },
+    maintenanceCost: { type: Number, default: 0, min: 0 },
     totalCost: { type: Number, default: 0, min: 0 },
     costPerUnit: { type: Number, default: 0, min: 0 },
     currency: { type: String, default: 'USD' },
     lastUpdated: { type: Date, default: Date.now }
+  },
+
+  // ===== AI Insights =====
+  insights: {
+    type: [{
+      title: { type: String },
+      description: { type: String },
+      type: { type: String, enum: ['insight', 'warning', 'opportunity'] },
+      confidence: { type: Number, min: 0, max: 1 },
+      recommendation: { type: String }
+    }],
+    default: []
   },
 
   // ===== Settings =====
@@ -278,6 +271,7 @@ const productionLineSchema = new mongoose.Schema({
   deletedBy: { type: String, default: null },
   deletedReason: { type: String, default: null }
 }, {
+  // خيارات إضافية
   timestamps: {
     createdAt: 'createdAt',
     updatedAt: 'updatedAt'
@@ -291,18 +285,26 @@ const productionLineSchema = new mongoose.Schema({
 });
 
 // ============ INDEXES ============
+// ✅ كل فهرس معرف مرة واحدة فقط
 
+// فهارس فريدة
 productionLineSchema.index({ name: 1, departmentId: 1, companyId: 1 }, { unique: true });
 productionLineSchema.index({ code: 1, departmentId: 1, companyId: 1 }, { unique: true });
+
+// فهارس للبحث
+productionLineSchema.index({ factoryId: 1 });
+productionLineSchema.index({ departmentId: 1 });
 productionLineSchema.index({ type: 1 });
-productionLineSchema.index({ status: 1 });
 productionLineSchema.index({ category: 1 });
 productionLineSchema.index({ priority: 1 });
 productionLineSchema.index({ 'performance.oee': 1 });
 productionLineSchema.index({ 'environmental.greenScore': 1 });
 productionLineSchema.index({ tags: 1 });
 productionLineSchema.index({ createdAt: -1 });
-productionLineSchema.index({ deletedAt: 1 }, { sparse: true });
+
+// ✅ تم إزالة indexes التالية لأنها معرفة بالفعل في BaseModel:
+// - status (معرف في BaseModel)
+// - deletedAt (معرف في BaseModel مع sparse: true)
 
 // ============ VIRTUALS ============
 
@@ -321,6 +323,10 @@ productionLineSchema.virtual('displayName').get(function() {
 
 productionLineSchema.virtual('totalMachineCount').get(function() {
   return this.machines.total || 0;
+});
+
+productionLineSchema.virtual('overallEfficiency').get(function() {
+  return this.performance.oee || 0;
 });
 
 // ============ METHODS ============
@@ -420,6 +426,14 @@ productionLineSchema.methods.addMaintenanceRecord = function(record) {
 };
 
 /**
+ * إضافة Insight
+ */
+productionLineSchema.methods.addInsight = function(insight) {
+  this.insights.push(insight);
+  return this.save();
+};
+
+/**
  * بدء التشغيل
  */
 productionLineSchema.methods.start = function() {
@@ -439,15 +453,14 @@ productionLineSchema.methods.stop = function() {
 };
 
 /**
- * حساب OEE تلقائياً
+ * حساب OEE تلقائياً - (بدون save لتجنب ParallelSaveError)
  */
 productionLineSchema.methods.calculateOEE = function() {
-  // OEE = Availability × Performance × Quality
   const availability = this.performance.availability / 100;
   const performance = this.performance.performance / 100;
   const quality = this.performance.quality / 100;
   this.performance.oee = Math.round((availability * performance * quality) * 100);
-  return this.save();
+  return this; // ✅ فقط يرجع الـ document من غير save
 };
 
 /**
@@ -473,6 +486,31 @@ productionLineSchema.methods.toPublicJSON = function() {
       energyConsumption: this.environmental.energyConsumption
     },
     createdAt: this.createdAt
+  };
+};
+
+/**
+ * البيانات الكاملة للإدارة
+ */
+productionLineSchema.methods.toAdminJSON = function() {
+  return {
+    ...this.toPublicJSON(),
+    factoryId: this.factoryId,
+    departmentId: this.departmentId,
+    operatingDetails: this.operatingDetails,
+    machines: this.machines,
+    employees: this.employees,
+    sensors: this.sensors,
+    maintenance: this.maintenance,
+    materials: this.materials,
+    cost: this.cost,
+    insights: this.insights,
+    settings: this.settings,
+    tags: this.tags,
+    metadata: this.metadata,
+    deletedAt: this.deletedAt,
+    deletedBy: this.deletedBy,
+    deletedReason: this.deletedReason
   };
 };
 
@@ -689,15 +727,8 @@ productionLineSchema.statics.getCategoryDistribution = async function(department
   ]);
 };
 
-// ============ MIDDLEWARE ============
-
-// Pre-save: تحديث updatedAt وتنظيف البيانات
-productionLineSchema.pre('save', function(next) {
-  this.updatedAt = new Date();
-  if (this.name) this.name = this.name.trim();
-  if (this.code) this.code = this.code.toUpperCase().trim();
-  next();
-});
+// ============ PRE-SAVE MIDDLEWARE (محذوف - BaseModel بيتعامل مع timestamps) ============
+// تم حذف Pre-save middleware لتجنب conflict مع Mongoose 9.7.4
 
 // ============ EXPORT ============
 

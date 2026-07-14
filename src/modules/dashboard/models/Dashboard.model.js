@@ -352,13 +352,8 @@ dashboardSchema.statics.findPinned = async function(userId, companyId) {
   }).sort({ createdAt: -1 });
 };
 
-// ============ MIDDLEWARE ============
-
-// Pre-save: تحديث updatedAt
-dashboardSchema.pre('save', function(next) {
-  this.updatedAt = new Date();
-  next();
-});
+// ============ PRE-SAVE MIDDLEWARE (محذوف - BaseModel يتعامل مع timestamps) ============
+// تم حذف Pre-save middleware لتجنب conflict مع Mongoose 9.7.4
 
 // ============ EXPORT ============
 

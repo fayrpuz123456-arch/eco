@@ -5,7 +5,7 @@ const SensorReading = require('../models/SensorReading.model');
 // ===== POST - إضافة قراءة جديدة =====
 router.post('/', async (req, res) => {
   try {
-    const { sensorId, value, unit, timestamp, quality } = req.body;
+    const { sensorId, value, unit, timestamp, quality, companyId, factoryId, machineId } = req.body;
 
     if (!sensorId || value === undefined || !unit) {
       return res.status(400).json({
@@ -14,12 +14,18 @@ router.post('/', async (req, res) => {
       });
     }
 
+    // ✅ إضافة الحقول المطلوبة مع قيم افتراضية من headers أو body
     const newReading = new SensorReading({
       sensorId,
       value,
       unit,
       timestamp: timestamp || new Date(),
-      quality: quality || 'good'
+      quality: quality || 'good',
+      companyId: companyId || req.headers['x-company-id'] || 'comp_test_001',
+      factoryId: factoryId || req.body.factoryId,
+      departmentId: req.body.departmentId || null,
+      productionLineId: req.body.productionLineId || null,
+      machineId: machineId || req.body.machineId
     });
 
     const savedReading = await newReading.save();
@@ -30,6 +36,7 @@ router.post('/', async (req, res) => {
       data: savedReading
     });
   } catch (error) {
+    console.error('❌ Error adding sensor reading:', error);
     res.status(500).json({
       success: false,
       message: 'Error adding sensor reading',
@@ -60,6 +67,7 @@ router.get('/sensor/:sensorId', async (req, res) => {
       count: readings.length
     });
   } catch (error) {
+    console.error('❌ Error fetching readings:', error);
     res.status(500).json({
       success: false,
       message: 'Error fetching readings',
@@ -88,6 +96,7 @@ router.get('/last/:sensorId', async (req, res) => {
       data: reading
     });
   } catch (error) {
+    console.error('❌ Error fetching last reading:', error);
     res.status(500).json({
       success: false,
       message: 'Error fetching last reading',
@@ -137,6 +146,7 @@ router.get('/stats/:sensorId', async (req, res) => {
       }
     });
   } catch (error) {
+    console.error('❌ Error fetching statistics:', error);
     res.status(500).json({
       success: false,
       message: 'Error fetching statistics',

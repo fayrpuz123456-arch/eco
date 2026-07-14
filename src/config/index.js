@@ -1,7 +1,6 @@
 const dotenv = require('dotenv');
 const path = require('path');
 
-// تحميل المتغيرات البيئية
 dotenv.config({ path: path.join(__dirname, '../../.env') });
 
 module.exports = {

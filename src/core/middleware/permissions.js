@@ -35,6 +35,13 @@ const PERMISSIONS = {
   DEPARTMENTS_DELETE: 'departments:delete',
   DEPARTMENTS_MANAGE: 'departments:manage',
   
+  // ===== Production Line Management =====
+  PRODUCTION_LINES_VIEW: 'productionlines:view',
+  PRODUCTION_LINES_CREATE: 'productionlines:create',
+  PRODUCTION_LINES_UPDATE: 'productionlines:update',
+  PRODUCTION_LINES_DELETE: 'productionlines:delete',
+  PRODUCTION_LINES_MANAGE: 'productionlines:manage',
+  
   // ===== Machine Management =====
   MACHINES_VIEW: 'machines:view',
   MACHINES_CREATE: 'machines:create',
@@ -109,6 +116,13 @@ const PERMISSIONS = {
   EXCHANGE_APPROVE: 'exchange:approve',
   EXCHANGE_MANAGE: 'exchange:manage',
   
+  // ===== Heat Recovery =====
+  HEAT_RECOVERY_VIEW: 'heatrecovery:view',
+  HEAT_RECOVERY_CREATE: 'heatrecovery:create',
+  HEAT_RECOVERY_UPDATE: 'heatrecovery:update',
+  HEAT_RECOVERY_DELETE: 'heatrecovery:delete',
+  HEAT_RECOVERY_MANAGE: 'heatrecovery:manage',
+  
   // ===== Digital Twin =====
   DIGITAL_TWIN_VIEW: 'digitaltwin:view',
   DIGITAL_TWIN_MANAGE: 'digitaltwin:manage',
@@ -168,6 +182,13 @@ const ROLES = {
       PERMISSIONS.DEPARTMENTS_UPDATE,
       PERMISSIONS.DEPARTMENTS_DELETE,
       PERMISSIONS.DEPARTMENTS_MANAGE,
+      
+      // Production Lines
+      PERMISSIONS.PRODUCTION_LINES_VIEW,
+      PERMISSIONS.PRODUCTION_LINES_CREATE,
+      PERMISSIONS.PRODUCTION_LINES_UPDATE,
+      PERMISSIONS.PRODUCTION_LINES_DELETE,
+      PERMISSIONS.PRODUCTION_LINES_MANAGE,
       
       // Machines
       PERMISSIONS.MACHINES_VIEW,
@@ -239,6 +260,13 @@ const ROLES = {
       PERMISSIONS.EXCHANGE_APPROVE,
       PERMISSIONS.EXCHANGE_MANAGE,
       
+      // Heat Recovery
+      PERMISSIONS.HEAT_RECOVERY_VIEW,
+      PERMISSIONS.HEAT_RECOVERY_CREATE,
+      PERMISSIONS.HEAT_RECOVERY_UPDATE,
+      PERMISSIONS.HEAT_RECOVERY_DELETE,
+      PERMISSIONS.HEAT_RECOVERY_MANAGE,
+      
       // Digital Twin
       PERMISSIONS.DIGITAL_TWIN_VIEW,
       PERMISSIONS.DIGITAL_TWIN_MANAGE,
@@ -266,6 +294,11 @@ const ROLES = {
       // Departments
       PERMISSIONS.DEPARTMENTS_VIEW,
       PERMISSIONS.DEPARTMENTS_UPDATE,
+      
+      // Production Lines
+      PERMISSIONS.PRODUCTION_LINES_VIEW,
+      PERMISSIONS.PRODUCTION_LINES_CREATE,
+      PERMISSIONS.PRODUCTION_LINES_UPDATE,
       
       // Machines
       PERMISSIONS.MACHINES_VIEW,
@@ -303,7 +336,12 @@ const ROLES = {
       // Exchange
       PERMISSIONS.EXCHANGE_VIEW,
       PERMISSIONS.EXCHANGE_CREATE,
-      PERMISSIONS.EXCHANGE_UPDATE
+      PERMISSIONS.EXCHANGE_UPDATE,
+      
+      // Heat Recovery
+      PERMISSIONS.HEAT_RECOVERY_VIEW,
+      PERMISSIONS.HEAT_RECOVERY_CREATE,
+      PERMISSIONS.HEAT_RECOVERY_UPDATE
     ],
     isAdmin: false
   },
@@ -318,6 +356,9 @@ const ROLES = {
       
       // Departments
       PERMISSIONS.DEPARTMENTS_VIEW,
+      
+      // Production Lines
+      PERMISSIONS.PRODUCTION_LINES_VIEW,
       
       // Machines
       PERMISSIONS.MACHINES_VIEW,
@@ -353,6 +394,9 @@ const ROLES = {
       PERMISSIONS.EXCHANGE_VIEW,
       PERMISSIONS.EXCHANGE_CREATE,
       
+      // Heat Recovery
+      PERMISSIONS.HEAT_RECOVERY_VIEW,
+      
       // Digital Twin
       PERMISSIONS.DIGITAL_TWIN_VIEW
     ],
@@ -369,6 +413,9 @@ const ROLES = {
       
       // Departments
       PERMISSIONS.DEPARTMENTS_VIEW,
+      
+      // Production Lines
+      PERMISSIONS.PRODUCTION_LINES_VIEW,
       
       // Machines
       PERMISSIONS.MACHINES_VIEW,
@@ -394,7 +441,10 @@ const ROLES = {
       PERMISSIONS.NOTIFICATIONS_VIEW,
       
       // Exchange
-      PERMISSIONS.EXCHANGE_VIEW
+      PERMISSIONS.EXCHANGE_VIEW,
+      
+      // Heat Recovery
+      PERMISSIONS.HEAT_RECOVERY_VIEW
     ],
     isAdmin: false
   },
@@ -409,6 +459,9 @@ const ROLES = {
       
       // Departments
       PERMISSIONS.DEPARTMENTS_VIEW,
+      
+      // Production Lines
+      PERMISSIONS.PRODUCTION_LINES_VIEW,
       
       // Machines
       PERMISSIONS.MACHINES_VIEW,
@@ -689,4 +742,4 @@ module.exports = {
   getAllPermissions,
   getPermissionsByCategory,
   composePermissions
-}; 
+};
