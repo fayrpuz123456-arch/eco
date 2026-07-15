@@ -200,6 +200,8 @@ dashboardSchema.index({ companyId: 1, 'settings.isDefault': 1 });
 dashboardSchema.index({ userId: 1, 'settings.pinned': 1 });
 dashboardSchema.index({ createdAt: -1 });
 dashboardSchema.index({ deletedAt: 1 }, { sparse: true });
+dashboardSchema.index({ name: 1 });
+dashboardSchema.index({ type: 1 });
 
 // ============ VIRTUALS ============
 
@@ -213,6 +215,176 @@ dashboardSchema.virtual('isPinned').get(function() {
 
 dashboardSchema.virtual('widgetCount').get(function() {
   return this.widgets.filter(w => w.isVisible).length;
+});
+
+// ============ PRE-SAVE MIDDLEWARE ============
+// ✅ تم التعليق لأن BaseModel يوفر Pre-save middleware
+// تجنباً لتكرار Pre-save hooks
+
+/*
+dashboardSchema.pre('save', function(next) {
+  try {
+    this.updatedAt = new Date();
+    
+    if (this.name) this.name = this.name.trim();
+    if (this.description) this.description = this.description.trim();
+    
+    if (!this.name) {
+      return next(new Error('Name is required'));
+    }
+    
+    if (!this.userId) {
+      return next(new Error('User ID is required'));
+    }
+    
+    if (!this.companyId) {
+      return next(new Error('Company ID is required'));
+    }
+    
+    if (!this.type) {
+      return next(new Error('Type is required'));
+    }
+    
+    if (this.widgets && this.widgets.length > 0) {
+      const widgetIds = new Set();
+      for (const widget of this.widgets) {
+        if (!widget.id) {
+          widget.id = uuidv4();
+        }
+        if (widgetIds.has(widget.id)) {
+          return next(new Error(`Duplicate widget ID found: ${widget.id}`));
+        }
+        widgetIds.add(widget.id);
+        
+        if (widget.title) widget.title = widget.title.trim();
+        if (widget.description) widget.description = widget.description.trim();
+      }
+    }
+    
+    if (this.filters && this.filters.length > 0) {
+      const filterIds = new Set();
+      for (const filter of this.filters) {
+        if (!filter.id) {
+          return next(new Error('Filter ID is required'));
+        }
+        if (filterIds.has(filter.id)) {
+          return next(new Error(`Duplicate filter ID found: ${filter.id}`));
+        }
+        filterIds.add(filter.id);
+        
+        if (filter.name) filter.name = filter.name.trim();
+      }
+    }
+    
+    this.lastUpdated = new Date();
+    
+    return next();
+  } catch (error) {
+    return next(error);
+  }
+});
+*/
+
+// ============ PRE-VALIDATE MIDDLEWARE ============
+// ✅ تم التعليق لأن BaseModel يوفر Pre-validate
+
+/*
+dashboardSchema.pre('validate', function(next) {
+  try {
+    if (this.name) {
+      this.name = this.name.trim();
+    }
+    
+    if (this.description) {
+      this.description = this.description.trim();
+    }
+    
+    if (this.timePeriod) {
+      if (this.timePeriod.startDate && this.timePeriod.endDate) {
+        if (new Date(this.timePeriod.startDate) > new Date(this.timePeriod.endDate)) {
+          return next(new Error('Start date must be before end date'));
+        }
+      }
+      if (this.timePeriod.customRange) {
+        if (this.timePeriod.customRange.startDate && this.timePeriod.customRange.endDate) {
+          if (new Date(this.timePeriod.customRange.startDate) > new Date(this.timePeriod.customRange.endDate)) {
+            return next(new Error('Custom range start date must be before end date'));
+          }
+        }
+      }
+    }
+    
+    return next();
+  } catch (error) {
+    return next(error);
+  }
+});
+*/
+
+// ============ PRE-FINDONEANDUPDATE MIDDLEWARE ============
+// ✅ تم التعليق لأن BaseModel يوفر Pre-findOneAndUpdate
+
+/*
+dashboardSchema.pre('findOneAndUpdate', function(next) {
+  try {
+    this.set({ updatedAt: new Date() });
+    this.set({ lastUpdated: new Date() });
+    return next();
+  } catch (error) {
+    return next(error);
+  }
+});
+*/
+
+// ============ PRE-UPDATEONE MIDDLEWARE ============
+// ✅ تم التعليق لأن BaseModel يوفر Pre-updateOne
+
+/*
+dashboardSchema.pre('updateOne', function(next) {
+  try {
+    this.set({ updatedAt: new Date() });
+    this.set({ lastUpdated: new Date() });
+    return next();
+  } catch (error) {
+    return next(error);
+  }
+});
+*/
+
+// ============ PRE-UPDATEMANY MIDDLEWARE ============
+// ✅ تم التعليق لأن BaseModel يوفر Pre-updateMany
+
+/*
+dashboardSchema.pre('updateMany', function(next) {
+  try {
+    this.set({ updatedAt: new Date() });
+    this.set({ lastUpdated: new Date() });
+    return next();
+  } catch (error) {
+    return next(error);
+  }
+});
+*/
+
+// ============ POST-SAVE MIDDLEWARE ============
+
+dashboardSchema.post('save', function(doc) {
+  console.log('✅ Dashboard saved successfully:', doc._id);
+});
+
+dashboardSchema.post('save', function(error, doc, next) {
+  if (error) {
+    console.error('❌ Error saving dashboard:', error.message);
+  }
+  next(error);
+});
+
+// ============ POST-FINDONEANDUPDATE MIDDLEWARE ============
+
+dashboardSchema.post('findOneAndUpdate', function(doc) {
+  if (doc) {
+    console.log('✅ Dashboard updated successfully:', doc._id);
+  }
 });
 
 // ============ METHODS ============
@@ -285,21 +457,50 @@ dashboardSchema.methods.toPublicJSON = function() {
   return {
     id: this._id,
     name: this.name,
+    description: this.description,
     type: this.type,
     layout: this.layout,
     widgets: this.widgets.map(w => ({
       id: w.id,
       type: w.type,
       title: w.title,
+      description: w.description,
       size: w.size,
       position: w.position,
-      isVisible: w.isVisible
+      isVisible: w.isVisible,
+      refreshInterval: w.refreshInterval
+    })),
+    filters: this.filters.map(f => ({
+      id: f.id,
+      name: f.name,
+      type: f.type,
+      isActive: f.isActive
     })),
     timePeriod: this.timePeriod,
     preferences: this.preferences,
     settings: this.settings,
+    widgetCount: this.widgetCount,
     lastUpdated: this.lastUpdated,
     createdAt: this.createdAt
+  };
+};
+
+/**
+ * البيانات الكاملة للإدارة
+ */
+dashboardSchema.methods.toAdminJSON = function() {
+  return {
+    ...this.toPublicJSON(),
+    companyId: this.companyId,
+    userId: this.userId,
+    createdBy: this.createdBy,
+    updatedBy: this.updatedBy,
+    metricsCache: this.metricsCache,
+    metadata: this.metadata,
+    deletedAt: this.deletedAt,
+    deletedBy: this.deletedBy,
+    deletedReason: this.deletedReason,
+    status: this.status
   };
 };
 
@@ -352,8 +553,92 @@ dashboardSchema.statics.findPinned = async function(userId, companyId) {
   }).sort({ createdAt: -1 });
 };
 
-// ============ PRE-SAVE MIDDLEWARE (محذوف - BaseModel يتعامل مع timestamps) ============
-// تم حذف Pre-save middleware لتجنب conflict مع Mongoose 9.7.4
+/**
+ * الحصول على إحصائيات لوحات التحكم
+ */
+dashboardSchema.statics.getStats = async function(userId, companyId) {
+  const stats = await this.aggregate([
+    { 
+      $match: { 
+        userId, 
+        companyId, 
+        deletedAt: null 
+      } 
+    },
+    {
+      $group: {
+        _id: null,
+        total: { $sum: 1 },
+        active: {
+          $sum: {
+            $cond: [{ $eq: ['$status', 'active'] }, 1, 0]
+          }
+        },
+        archived: {
+          $sum: {
+            $cond: [{ $eq: ['$status', 'archived'] }, 1, 0]
+          }
+        },
+        default: {
+          $sum: {
+            $cond: ['$settings.isDefault', 1, 0]
+          }
+        },
+        pinned: {
+          $sum: {
+            $cond: ['$settings.pinned', 1, 0]
+          }
+        },
+        public: {
+          $sum: {
+            $cond: ['$settings.isPublic', 1, 0]
+          }
+        }
+      }
+    }
+  ]);
+  
+  return stats[0] || {
+    total: 0,
+    active: 0,
+    archived: 0,
+    default: 0,
+    pinned: 0,
+    public: 0
+  };
+};
+
+/**
+ * نسخ لوحة تحكم
+ */
+dashboardSchema.statics.clone = async function(dashboardId, userId, newName) {
+  const original = await this.findById(dashboardId);
+  if (!original) {
+    throw new Error('Dashboard not found');
+  }
+  
+  const cloned = new this({
+    ...original.toObject(),
+    _id: uuidv4(),
+    name: newName || `${original.name} (Copy)`,
+    userId: userId || original.userId,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    settings: {
+      ...original.settings,
+      isDefault: false,
+      pinned: false
+    }
+  });
+  
+  // إعادة تعيين معرفات widgets
+  cloned.widgets = cloned.widgets.map(w => ({
+    ...w,
+    id: uuidv4()
+  }));
+  
+  return cloned.save();
+};
 
 // ============ EXPORT ============
 

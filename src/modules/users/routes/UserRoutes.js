@@ -7,22 +7,26 @@ const User = require('../models/User.model');
 // ✅ استيراد Auth Middleware
 const { authMiddleware } = require('../../../core/middleware/auth');
 
-// ===== GET - قائمة المستخدمين من قاعدة البيانات =====
-router.get('/', async (req, res) => {
+// ============================================
+// ✅ 1. STATIC ROUTES (Routes الثابتة)
+// ============================================
+
+// ===== GET /active - المستخدمين النشطين =====
+router.get('/active', async (req, res) => {
   try {
-    const users = await User.find().select('-__v');
+    const users = await User.find({ status: 'active', deletedAt: null }).select('-__v');
     
     res.json({
       success: true,
-      message: 'Users retrieved from database successfully',
+      message: 'Active users retrieved successfully',
       data: users,
       count: users.length
     });
   } catch (error) {
-    console.error('❌ GET /users error:', error);
+    console.error('❌ GET /active error:', error);
     res.status(500).json({
       success: false,
-      message: 'Error fetching users',
+      message: 'Error fetching active users',
       error: error.message
     });
   }
@@ -57,169 +61,36 @@ router.get('/me', authMiddleware, async (req, res) => {
   }
 });
 
-// ===== GET - مستخدم بالمعرف من قاعدة البيانات =====
-router.get('/:id', async (req, res) => {
+// ===== GET /stats - إحصائيات =====
+router.get('/stats', async (req, res) => {
   try {
-    const user = await User.findById(req.params.id);
+    const total = await User.countDocuments();
+    const active = await User.countDocuments({ status: 'active', deletedAt: null });
+    const inactive = await User.countDocuments({ status: 'inactive', deletedAt: null });
+    const suspended = await User.countDocuments({ status: 'suspended', deletedAt: null });
     
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: 'User not found'
-      });
-    }
-    
-    res.json({
-      success: true,
-      message: 'User retrieved successfully',
-      data: user
-    });
-  } catch (error) {
-    console.error('❌ GET /users/:id error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error fetching user',
-      error: error.message
-    });
-  }
-});
-
-// ===== POST - إنشاء مستخدم جديد في قاعدة البيانات =====
-router.post('/', async (req, res) => {
-  try {
-    console.log('📝 POST /users - Body:', req.body);
-    
-    const { email, displayName, role, firebaseUid } = req.body; // ✅ إضافة firebaseUid
-
-    // التحقق من البيانات المطلوبة
-    if (!email || !displayName) {
-      console.log('❌ Missing email or displayName');
-      return res.status(400).json({
-        success: false,
-        message: 'Email and displayName are required fields',
-        errors: {
-          email: !email ? 'Email is required' : undefined,
-          displayName: !displayName ? 'Display name is required' : undefined
-        }
-      });
-    }
-
-    // التحقق من عدم وجود مستخدم بنفس البريد
-    console.log('🔍 Checking if user exists:', email);
-    const existingUser = await User.findOne({ email });
-    if (existingUser) {
-      console.log('⚠️ User already exists:', email);
-      return res.status(409).json({
-        success: false,
-        message: 'User with this email already exists'
-      });
-    }
-
-    console.log('✅ Creating new user...');
-    // إنشاء مستخدم جديد
-    const newUser = new User({
-      email,
-      displayName,
-      role: role || 'employee',
-      status: 'active',
-      companyId: 'comp_test_001',
-      firebaseUid: firebaseUid || `firebase_${Date.now()}` // ✅ استخدام القيمة المرسلة أو إنشاء واحدة
-    });
-
-    console.log('📦 Saving user to database...');
-    // حفظ في قاعدة البيانات
-    const savedUser = await newUser.save();
-    console.log('✅ User saved successfully! ID:', savedUser._id);
-
-    res.status(201).json({
-      success: true,
-      message: 'User created in database successfully',
-      data: savedUser
-    });
-
-  } catch (error) {
-    console.error('❌ Error creating user:', error);
-    console.error('❌ Error stack:', error.stack);
-    res.status(500).json({
-      success: false,
-      message: 'Error creating user',
-      error: error.message,
-      stack: error.stack
-    });
-  }
-});
-
-// ===== PUT - تحديث مستخدم =====
-router.put('/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { displayName, role, email, firebaseUid, deletedAt, status } = req.body; // ✅ إضافة الحقول
-
-    const user = await User.findById(id);
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: 'User not found'
-      });
-    }
-
-    // تحديث الحقول
-    if (displayName) user.displayName = displayName;
-    if (role) user.role = role;
-    if (email) user.email = email;
-    if (firebaseUid) user.firebaseUid = firebaseUid; // ✅ تحديث firebaseUid
-    if (deletedAt !== undefined) user.deletedAt = deletedAt; // ✅ تحديث deletedAt
-    if (status) user.status = status; // ✅ تحديث status
-
-    const updatedUser = await user.save();
+    const admins = await User.countDocuments({ role: 'admin', deletedAt: null });
+    const managers = await User.countDocuments({ role: 'manager', deletedAt: null });
+    const employees = await User.countDocuments({ role: 'employee', deletedAt: null });
 
     res.json({
       success: true,
-      message: `User ${id} updated successfully`,
-      data: updatedUser
-    });
-  } catch (error) {
-    console.error('❌ PUT /users/:id error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error updating user',
-      error: error.message
-    });
-  }
-});
-
-// ===== DELETE - حذف مستخدم (Soft Delete) =====
-router.delete('/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    const user = await User.findById(id);
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: 'User not found'
-      });
-    }
-
-    // Soft Delete - وضع علامة محذوف
-    user.deletedAt = new Date();
-    user.status = 'archived';
-    await user.save();
-
-    res.json({
-      success: true,
-      message: `User ${id} deleted successfully`,
+      message: 'User statistics retrieved successfully',
       data: {
-        id: id,
-        status: 'deleted',
-        deletedAt: new Date().toISOString()
+        total,
+        active,
+        inactive,
+        suspended,
+        admins,
+        managers,
+        employees
       }
     });
   } catch (error) {
-    console.error('❌ DELETE /users/:id error:', error);
+    console.error('❌ GET /stats error:', error);
     res.status(500).json({
       success: false,
-      message: 'Error deleting user',
+      message: 'Error fetching stats',
       error: error.message
     });
   }
@@ -260,61 +131,9 @@ router.get('/search', async (req, res) => {
   }
 });
 
-// ===== GET /active - المستخدمين النشطين =====
-router.get('/active', async (req, res) => {
-  try {
-    const users = await User.find({ status: 'active', deletedAt: null }).select('-__v');
-    
-    res.json({
-      success: true,
-      message: 'Active users retrieved successfully',
-      data: users,
-      count: users.length
-    });
-  } catch (error) {
-    console.error('❌ GET /active error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error fetching active users',
-      error: error.message
-    });
-  }
-});
-
-// ===== GET /stats - إحصائيات =====
-router.get('/stats', async (req, res) => {
-  try {
-    const total = await User.countDocuments();
-    const active = await User.countDocuments({ status: 'active', deletedAt: null });
-    const inactive = await User.countDocuments({ status: 'inactive', deletedAt: null });
-    const suspended = await User.countDocuments({ status: 'suspended', deletedAt: null });
-    
-    const admins = await User.countDocuments({ role: 'admin', deletedAt: null });
-    const managers = await User.countDocuments({ role: 'manager', deletedAt: null });
-    const employees = await User.countDocuments({ role: 'employee', deletedAt: null });
-
-    res.json({
-      success: true,
-      message: 'User statistics retrieved successfully',
-      data: {
-        total,
-        active,
-        inactive,
-        suspended,
-        admins,
-        managers,
-        employees
-      }
-    });
-  } catch (error) {
-    console.error('❌ GET /stats error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error fetching stats',
-      error: error.message
-    });
-  }
-});
+// ============================================
+// ✅ 2. PARAMETER ROUTES (Routes ذات الـ Parameters)
+// ============================================
 
 // ===== GET /role/:role - مستخدمين حسب الدور =====
 router.get('/role/:role', async (req, res) => {
@@ -381,6 +200,123 @@ router.get('/department/:departmentId', async (req, res) => {
       success: false,
       message: 'Error fetching users by department',
       error: error.message
+    });
+  }
+});
+
+// ============================================
+// ✅ 3. DYNAMIC ROUTES (Routes الديناميكية)
+// ============================================
+
+// ===== GET - قائمة المستخدمين من قاعدة البيانات =====
+router.get('/', async (req, res) => {
+  try {
+    const users = await User.find().select('-__v');
+    
+    res.json({
+      success: true,
+      message: 'Users retrieved from database successfully',
+      data: users,
+      count: users.length
+    });
+  } catch (error) {
+    console.error('❌ GET /users error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching users',
+      error: error.message
+    });
+  }
+});
+
+// ===== GET - مستخدم بالمعرف من قاعدة البيانات =====
+router.get('/:id', async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id);
+    
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+    
+    res.json({
+      success: true,
+      message: 'User retrieved successfully',
+      data: user
+    });
+  } catch (error) {
+    console.error('❌ GET /users/:id error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching user',
+      error: error.message
+    });
+  }
+});
+
+// ===== POST - إنشاء مستخدم جديد في قاعدة البيانات =====
+router.post('/', async (req, res) => {
+  try {
+    console.log('📝 POST /users - Body:', req.body);
+    
+    const { email, displayName, role, firebaseUid } = req.body;
+
+    // التحقق من البيانات المطلوبة
+    if (!email || !displayName) {
+      console.log('❌ Missing email or displayName');
+      return res.status(400).json({
+        success: false,
+        message: 'Email and displayName are required fields',
+        errors: {
+          email: !email ? 'Email is required' : undefined,
+          displayName: !displayName ? 'Display name is required' : undefined
+        }
+      });
+    }
+
+    // التحقق من عدم وجود مستخدم بنفس البريد
+    console.log('🔍 Checking if user exists:', email);
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+      console.log('⚠️ User already exists:', email);
+      return res.status(409).json({
+        success: false,
+        message: 'User with this email already exists'
+      });
+    }
+
+    console.log('✅ Creating new user...');
+    // إنشاء مستخدم جديد
+    const newUser = new User({
+      email,
+      displayName,
+      role: role || 'employee',
+      status: 'active',
+      companyId: 'comp_test_001',
+      firebaseUid: firebaseUid || `firebase_${Date.now()}`
+    });
+
+    console.log('📦 Saving user to database...');
+    // حفظ في قاعدة البيانات
+    const savedUser = await newUser.save();
+    console.log('✅ User saved successfully! ID:', savedUser._id);
+
+    res.status(201).json({
+      success: true,
+      message: 'User created in database successfully',
+      data: savedUser
+    });
+
+  } catch (error) {
+    console.error('❌ Error creating user:', error);
+    console.error('❌ Error stack:', error.stack);
+    res.status(500).json({
+      success: false,
+      message: 'Error creating user',
+      error: error.message,
+      stack: error.stack
     });
   }
 });
@@ -458,6 +394,82 @@ router.put('/:id/status', async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Error updating status',
+      error: error.message
+    });
+  }
+});
+
+// ===== PUT - تحديث مستخدم =====
+router.put('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { displayName, role, email, firebaseUid, deletedAt, status } = req.body;
+
+    const user = await User.findById(id);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    // تحديث الحقول
+    if (displayName) user.displayName = displayName;
+    if (role) user.role = role;
+    if (email) user.email = email;
+    if (firebaseUid) user.firebaseUid = firebaseUid;
+    if (deletedAt !== undefined) user.deletedAt = deletedAt;
+    if (status) user.status = status;
+
+    const updatedUser = await user.save();
+
+    res.json({
+      success: true,
+      message: `User ${id} updated successfully`,
+      data: updatedUser
+    });
+  } catch (error) {
+    console.error('❌ PUT /users/:id error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error updating user',
+      error: error.message
+    });
+  }
+});
+
+// ===== DELETE - حذف مستخدم (Soft Delete) =====
+router.delete('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const user = await User.findById(id);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    // Soft Delete - وضع علامة محذوف
+    user.deletedAt = new Date();
+    user.status = 'archived';
+    await user.save();
+
+    res.json({
+      success: true,
+      message: `User ${id} deleted successfully`,
+      data: {
+        id: id,
+        status: 'deleted',
+        deletedAt: new Date().toISOString()
+      }
+    });
+  } catch (error) {
+    console.error('❌ DELETE /users/:id error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error deleting user',
       error: error.message
     });
   }

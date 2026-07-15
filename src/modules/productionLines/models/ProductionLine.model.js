@@ -329,6 +329,175 @@ productionLineSchema.virtual('overallEfficiency').get(function() {
   return this.performance.oee || 0;
 });
 
+// ============ PRE-SAVE MIDDLEWARE (تم التعديل النهائي) ============
+
+productionLineSchema.pre('save', function(next) {
+  try {
+    // تحديث updatedAt تلقائياً
+    this.updatedAt = new Date();
+    
+    // تنظيف البيانات
+    if (this.name) this.name = this.name.trim();
+    if (this.code) this.code = this.code.toUpperCase().trim();
+    if (this.description) this.description = this.description.trim();
+    
+    // تنظيف بيانات المواد الخام
+    if (this.materials && this.materials.rawMaterials) {
+      for (const material of this.materials.rawMaterials) {
+        if (material.name) material.name = material.name.trim();
+        if (material.code) material.code = material.code.trim();
+      }
+    }
+    
+    // تنظيف بيانات المنتجات النهائية
+    if (this.materials && this.materials.finishedGoods) {
+      for (const good of this.materials.finishedGoods) {
+        if (good.name) good.name = good.name.trim();
+        if (good.code) good.code = good.code.trim();
+      }
+    }
+    
+    // التحقق من البيانات المطلوبة
+    if (!this.name) {
+      return next(new Error('Name is required'));
+    }
+    
+    if (!this.code) {
+      return next(new Error('Code is required'));
+    }
+    
+    if (!this.factoryId) {
+      return next(new Error('Factory ID is required'));
+    }
+    
+    if (!this.departmentId) {
+      return next(new Error('Department ID is required'));
+    }
+    
+    if (!this.type) {
+      return next(new Error('Type is required'));
+    }
+    
+    // التحقق من صحة الكود
+    const codeRegex = /^[A-Z0-9]+$/;
+    if (this.code && !codeRegex.test(this.code)) {
+      return next(new Error('Code must contain only uppercase letters and numbers'));
+    }
+    
+    // حساب OEE تلقائياً إذا كانت البيانات متوفرة
+    if (this.performance && this.performance.availability && 
+        this.performance.performance && this.performance.quality) {
+      this.calculateOEE();
+    }
+    
+    // تحديث lastUpdated للحقول الفرعية
+    this.performance.lastUpdated = new Date();
+    this.quality.lastUpdated = new Date();
+    this.machines.lastUpdated = new Date();
+    this.sensors.lastUpdated = new Date();
+    this.employees.lastUpdated = new Date();
+    this.environmental.lastUpdated = new Date();
+    this.cost.lastUpdated = new Date();
+    this.materials.lastUpdated = new Date();
+    
+    // ✅ استدعاء next() في النهاية
+    return next();
+  } catch (error) {
+    // ✅ في حالة الخطأ، مرر الخطأ لـ next
+    return next(error);
+  }
+});
+
+// ============ PRE-VALIDATE MIDDLEWARE ============
+
+productionLineSchema.pre('validate', function(next) {
+  try {
+    // التحقق من صحة البيانات قبل الحفظ
+    if (this.name) {
+      this.name = this.name.trim();
+    }
+    
+    if (this.code) {
+      this.code = this.code.toUpperCase().trim();
+    }
+    
+    if (this.description) {
+      this.description = this.description.trim();
+    }
+    
+    // التحقق من أن أوقات التشغيل صحيحة
+    if (this.operatingDetails && this.operatingDetails.operatingHours) {
+      const timeRegex = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/;
+      if (this.operatingDetails.operatingHours.start && 
+          !timeRegex.test(this.operatingDetails.operatingHours.start)) {
+        return next(new Error('Invalid start time format. Use HH:MM'));
+      }
+      if (this.operatingDetails.operatingHours.end && 
+          !timeRegex.test(this.operatingDetails.operatingHours.end)) {
+        return next(new Error('Invalid end time format. Use HH:MM'));
+      }
+    }
+    
+    return next();
+  } catch (error) {
+    return next(error);
+  }
+});
+
+// ============ PRE-FINDONEANDUPDATE MIDDLEWARE ============
+
+productionLineSchema.pre('findOneAndUpdate', function(next) {
+  try {
+    this.set({ updatedAt: new Date() });
+    return next();
+  } catch (error) {
+    return next(error);
+  }
+});
+
+// ============ PRE-UPDATEONE MIDDLEWARE ============
+
+productionLineSchema.pre('updateOne', function(next) {
+  try {
+    this.set({ updatedAt: new Date() });
+    return next();
+  } catch (error) {
+    return next(error);
+  }
+});
+
+// ============ PRE-UPDATEMANY MIDDLEWARE ============
+
+productionLineSchema.pre('updateMany', function(next) {
+  try {
+    this.set({ updatedAt: new Date() });
+    return next();
+  } catch (error) {
+    return next(error);
+  }
+});
+
+// ============ POST-SAVE MIDDLEWARE ============
+
+productionLineSchema.post('save', function(doc) {
+  console.log('✅ Production line saved successfully:', doc._id);
+});
+
+productionLineSchema.post('save', function(error, doc, next) {
+  if (error) {
+    console.error('❌ Error saving production line:', error.message);
+  }
+  next(error);
+});
+
+// ============ POST-FINDONEANDUPDATE MIDDLEWARE ============
+
+productionLineSchema.post('findOneAndUpdate', function(doc) {
+  if (doc) {
+    console.log('✅ Production line updated successfully:', doc._id);
+  }
+});
+
 // ============ METHODS ============
 
 /**
@@ -384,6 +553,7 @@ productionLineSchema.methods.updateQuality = function(quality) {
   if (quality.qualityScore !== undefined) this.quality.qualityScore = Math.min(100, Math.max(0, quality.qualityScore));
   if (quality.lastInspection !== undefined) this.quality.lastInspection = quality.lastInspection;
   if (quality.nextInspection !== undefined) this.quality.nextInspection = quality.nextInspection;
+  this.quality.lastUpdated = new Date();
   return this.save();
 };
 
@@ -392,6 +562,7 @@ productionLineSchema.methods.updateQuality = function(quality) {
  */
 productionLineSchema.methods.updateGreenScore = function(score) {
   this.environmental.greenScore = Math.min(100, Math.max(0, score));
+  this.environmental.lastUpdated = new Date();
   return this.save();
 };
 
@@ -726,9 +897,6 @@ productionLineSchema.statics.getCategoryDistribution = async function(department
     { $sort: { count: -1 } }
   ]);
 };
-
-// ============ PRE-SAVE MIDDLEWARE (محذوف - BaseModel بيتعامل مع timestamps) ============
-// تم حذف Pre-save middleware لتجنب conflict مع Mongoose 9.7.4
 
 // ============ EXPORT ============
 

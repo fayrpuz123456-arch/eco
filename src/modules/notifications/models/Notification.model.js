@@ -222,6 +222,126 @@ notificationSchema.virtual('isDelivered').get(function() {
   return this.status === 'delivered';
 });
 
+// ============ PRE-SAVE MIDDLEWARE ============
+// ✅ تم التعليق لأن BaseModel يوفر Pre-save middleware
+// تجنباً لتكرار Pre-save hooks
+
+/*
+notificationSchema.pre('save', function(next) {
+  try {
+    this.updatedAt = new Date();
+    
+    if (this.title) this.title = this.title.trim();
+    if (this.message) this.message = this.message.trim();
+    if (this.body) this.body = this.body.trim();
+    
+    if (this.scheduledAt && this.status === 'pending') {
+      this.isScheduled = true;
+    }
+    
+    if (!this.userId) {
+      return next(new Error('userId is required'));
+    }
+    
+    if (!this.title || !this.message) {
+      return next(new Error('Title and message are required'));
+    }
+    
+    return next();
+  } catch (error) {
+    return next(error);
+  }
+});
+*/
+
+// ============ PRE-VALIDATE MIDDLEWARE ============
+// ✅ تم التعليق لأن BaseModel يوفر Pre-validate
+
+/*
+notificationSchema.pre('validate', function(next) {
+  try {
+    if (this.title) {
+      this.title = this.title.trim();
+    }
+    
+    if (this.message) {
+      this.message = this.message.trim();
+    }
+    
+    if (this.body) {
+      this.body = this.body.trim();
+    }
+    
+    return next();
+  } catch (error) {
+    return next(error);
+  }
+});
+*/
+
+// ============ PRE-FINDONEANDUPDATE MIDDLEWARE ============
+// ✅ تم التعليق لأن BaseModel يوفر Pre-findOneAndUpdate
+
+/*
+notificationSchema.pre('findOneAndUpdate', function(next) {
+  try {
+    this.set({ updatedAt: new Date() });
+    return next();
+  } catch (error) {
+    return next(error);
+  }
+});
+*/
+
+// ============ PRE-UPDATEONE MIDDLEWARE ============
+// ✅ تم التعليق لأن BaseModel يوفر Pre-updateOne
+
+/*
+notificationSchema.pre('updateOne', function(next) {
+  try {
+    this.set({ updatedAt: new Date() });
+    return next();
+  } catch (error) {
+    return next(error);
+  }
+});
+*/
+
+// ============ PRE-UPDATEMANY MIDDLEWARE ============
+// ✅ تم التعليق لأن BaseModel يوفر Pre-updateMany
+
+/*
+notificationSchema.pre('updateMany', function(next) {
+  try {
+    this.set({ updatedAt: new Date() });
+    return next();
+  } catch (error) {
+    return next(error);
+  }
+});
+*/
+
+// ============ POST-SAVE MIDDLEWARE ============
+
+notificationSchema.post('save', function(doc) {
+  console.log('✅ Notification saved successfully:', doc._id);
+});
+
+notificationSchema.post('save', function(error, doc, next) {
+  if (error) {
+    console.error('❌ Error saving notification:', error.message);
+  }
+  next(error);
+});
+
+// ============ POST-FINDONEANDUPDATE MIDDLEWARE ============
+
+notificationSchema.post('findOneAndUpdate', function(doc) {
+  if (doc) {
+    console.log('✅ Notification updated successfully:', doc._id);
+  }
+});
+
 // ============ METHODS ============
 
 /**
@@ -477,24 +597,6 @@ notificationSchema.statics.findScheduled = async function() {
     deletedAt: null
   }).sort({ scheduledAt: 1 });
 };
-
-// ============ PRE-SAVE MIDDLEWARE ============
-
-notificationSchema.pre('save', function(next) {
-  this.updatedAt = new Date();
-  
-  // تنظيف البيانات
-  if (this.title) this.title = this.title.trim();
-  if (this.message) this.message = this.message.trim();
-  if (this.body) this.body = this.body.trim();
-  
-  // إذا كان مجدولاً وغير مرسل، الحالة pending
-  if (this.scheduledAt && this.status === 'pending') {
-    this.isScheduled = true;
-  }
-  
-  next();
-});
 
 // ============ EXPORT ============
 

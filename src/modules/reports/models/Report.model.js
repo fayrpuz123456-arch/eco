@@ -273,6 +273,151 @@ reportSchema.virtual('isScheduled').get(function() {
   return this.scheduling.enabled;
 });
 
+// ============ PRE-SAVE MIDDLEWARE ============
+// ✅ تم التعليق لأن BaseModel يوفر Pre-save middleware
+// تجنباً لتكرار Pre-save hooks
+
+/*
+reportSchema.pre('save', function(next) {
+  try {
+    this.updatedAt = new Date();
+    
+    if (this.name) this.name = this.name.trim();
+    if (this.code) this.code = this.code.toUpperCase().trim();
+    if (this.description) this.description = this.description.trim();
+    
+    if (!this.factoryId) {
+      return next(new Error('factoryId is required'));
+    }
+    
+    if (!this.name) {
+      return next(new Error('Name is required'));
+    }
+    
+    if (!this.code) {
+      return next(new Error('Code is required'));
+    }
+    
+    if (!this.type) {
+      return next(new Error('Type is required'));
+    }
+    
+    if (!this.period || !this.period.startDate || !this.period.endDate) {
+      return next(new Error('Period startDate and endDate are required'));
+    }
+    
+    if (this.data && Object.keys(this.data).length > 0 && this.status === 'completed') {
+      const values = Object.values(this.data).filter(v => typeof v === 'number');
+      if (values.length > 0) {
+        this.summary.total = values.reduce((a, b) => a + b, 0);
+        this.summary.average = this.summary.total / values.length;
+        this.summary.min = Math.min(...values);
+        this.summary.max = Math.max(...values);
+        this.summary.count = values.length;
+      }
+    }
+    
+    return next();
+  } catch (error) {
+    return next(error);
+  }
+});
+*/
+
+// ============ PRE-VALIDATE MIDDLEWARE ============
+// ✅ تم التعليق لأن BaseModel يوفر Pre-validate
+
+/*
+reportSchema.pre('validate', function(next) {
+  try {
+    if (this.name) {
+      this.name = this.name.trim();
+    }
+    
+    if (this.code) {
+      this.code = this.code.toUpperCase().trim();
+    }
+    
+    if (this.description) {
+      this.description = this.description.trim();
+    }
+    
+    if (this.period && this.period.startDate && this.period.endDate) {
+      if (new Date(this.period.startDate) > new Date(this.period.endDate)) {
+        return next(new Error('Start date must be before end date'));
+      }
+    }
+    
+    return next();
+  } catch (error) {
+    return next(error);
+  }
+});
+*/
+
+// ============ PRE-FINDONEANDUPDATE MIDDLEWARE ============
+// ✅ تم التعليق لأن BaseModel يوفر Pre-findOneAndUpdate
+
+/*
+reportSchema.pre('findOneAndUpdate', function(next) {
+  try {
+    this.set({ updatedAt: new Date() });
+    return next();
+  } catch (error) {
+    return next(error);
+  }
+});
+*/
+
+// ============ PRE-UPDATEONE MIDDLEWARE ============
+// ✅ تم التعليق لأن BaseModel يوفر Pre-updateOne
+
+/*
+reportSchema.pre('updateOne', function(next) {
+  try {
+    this.set({ updatedAt: new Date() });
+    return next();
+  } catch (error) {
+    return next(error);
+  }
+});
+*/
+
+// ============ PRE-UPDATEMANY MIDDLEWARE ============
+// ✅ تم التعليق لأن BaseModel يوفر Pre-updateMany
+
+/*
+reportSchema.pre('updateMany', function(next) {
+  try {
+    this.set({ updatedAt: new Date() });
+    return next();
+  } catch (error) {
+    return next(error);
+  }
+});
+*/
+
+// ============ POST-SAVE MIDDLEWARE ============
+
+reportSchema.post('save', function(doc) {
+  console.log('✅ Report saved successfully:', doc._id);
+});
+
+reportSchema.post('save', function(error, doc, next) {
+  if (error) {
+    console.error('❌ Error saving report:', error.message);
+  }
+  next(error);
+});
+
+// ============ POST-FINDONEANDUPDATE MIDDLEWARE ============
+
+reportSchema.post('findOneAndUpdate', function(doc) {
+  if (doc) {
+    console.log('✅ Report updated successfully:', doc._id);
+  }
+});
+
 // ============ METHODS ============
 
 /**
@@ -545,31 +690,6 @@ reportSchema.statics.findScheduled = async function() {
     deletedAt: null
   });
 };
-
-// ============ PRE-SAVE MIDDLEWARE ============
-
-reportSchema.pre('save', function(next) {
-  this.updatedAt = new Date();
-  
-  // تنظيف البيانات
-  if (this.name) this.name = this.name.trim();
-  if (this.code) this.code = this.code.toUpperCase().trim();
-  if (this.description) this.description = this.description.trim();
-  
-  // حساب summary تلقائياً إذا كانت data موجودة
-  if (this.data && Object.keys(this.data).length > 0 && this.status === 'completed') {
-    const values = Object.values(this.data).filter(v => typeof v === 'number');
-    if (values.length > 0) {
-      this.summary.total = values.reduce((a, b) => a + b, 0);
-      this.summary.average = this.summary.total / values.length;
-      this.summary.min = Math.min(...values);
-      this.summary.max = Math.max(...values);
-      this.summary.count = values.length;
-    }
-  }
-  
-  next();
-});
 
 // ============ EXPORT ============
 

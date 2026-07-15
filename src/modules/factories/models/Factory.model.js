@@ -81,6 +81,10 @@ const factorySchema = new mongoose.Schema({
 
 // ============ INDEXES ============
 factorySchema.index({ code: 1, companyId: 1 }, { unique: true });
+factorySchema.index({ companyId: 1, status: 1 });
+factorySchema.index({ industry: 1 });
+factorySchema.index({ name: 1 });
+factorySchema.index({ deletedAt: 1 }, { sparse: true });
 
 // ============ VIRTUALS ============
 
@@ -90,6 +94,152 @@ factorySchema.virtual('isActive').get(function() {
 
 factorySchema.virtual('displayName').get(function() {
   return `${this.name} (${this.code})`;
+});
+
+// ============ PRE-SAVE MIDDLEWARE ============
+// ✅ تم التعليق لأن BaseModel يوفر Pre-save middleware
+// تجنباً لتكرار Pre-save hooks
+
+/*
+factorySchema.pre('save', function(next) {
+  try {
+    this.updatedAt = new Date();
+    
+    if (this.name) this.name = this.name.trim();
+    if (this.code) this.code = this.code.toUpperCase().trim();
+    if (this.contactEmail) this.contactEmail = this.contactEmail.toLowerCase().trim();
+    if (this.description) this.description = this.description.trim();
+    
+    if (this.address) {
+      if (this.address.street) this.address.street = this.address.street.trim();
+      if (this.address.city) this.address.city = this.address.city.trim();
+      if (this.address.state) this.address.state = this.address.state.trim();
+      if (this.address.country) this.address.country = this.address.country.trim();
+      if (this.address.postalCode) this.address.postalCode = this.address.postalCode.trim();
+    }
+    
+    if (!this.name) {
+      return next(new Error('Name is required'));
+    }
+    
+    if (!this.code) {
+      return next(new Error('Code is required'));
+    }
+    
+    if (!this.industry) {
+      return next(new Error('Industry is required'));
+    }
+    
+    if (!this.companyId) {
+      return next(new Error('Company ID is required'));
+    }
+    
+    if (!this.contactEmail) {
+      return next(new Error('Contact email is required'));
+    }
+    
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(this.contactEmail)) {
+      return next(new Error('Invalid email format'));
+    }
+    
+    return next();
+  } catch (error) {
+    return next(error);
+  }
+});
+*/
+
+// ============ PRE-VALIDATE MIDDLEWARE ============
+// ✅ تم التعليق لأن BaseModel يوفر Pre-validate
+
+/*
+factorySchema.pre('validate', function(next) {
+  try {
+    if (this.name) {
+      this.name = this.name.trim();
+    }
+    
+    if (this.code) {
+      this.code = this.code.toUpperCase().trim();
+    }
+    
+    if (this.contactEmail) {
+      this.contactEmail = this.contactEmail.toLowerCase().trim();
+    }
+    
+    if (this.description) {
+      this.description = this.description.trim();
+    }
+    
+    return next();
+  } catch (error) {
+    return next(error);
+  }
+});
+*/
+
+// ============ PRE-FINDONEANDUPDATE MIDDLEWARE ============
+// ✅ تم التعليق لأن BaseModel يوفر Pre-findOneAndUpdate
+
+/*
+factorySchema.pre('findOneAndUpdate', function(next) {
+  try {
+    this.set({ updatedAt: new Date() });
+    return next();
+  } catch (error) {
+    return next(error);
+  }
+});
+*/
+
+// ============ PRE-UPDATEONE MIDDLEWARE ============
+// ✅ تم التعليق لأن BaseModel يوفر Pre-updateOne
+
+/*
+factorySchema.pre('updateOne', function(next) {
+  try {
+    this.set({ updatedAt: new Date() });
+    return next();
+  } catch (error) {
+    return next(error);
+  }
+});
+*/
+
+// ============ PRE-UPDATEMANY MIDDLEWARE ============
+// ✅ تم التعليق لأن BaseModel يوفر Pre-updateMany
+
+/*
+factorySchema.pre('updateMany', function(next) {
+  try {
+    this.set({ updatedAt: new Date() });
+    return next();
+  } catch (error) {
+    return next(error);
+  }
+});
+*/
+
+// ============ POST-SAVE MIDDLEWARE ============
+
+factorySchema.post('save', function(doc) {
+  console.log('✅ Factory saved successfully:', doc._id);
+});
+
+factorySchema.post('save', function(error, doc, next) {
+  if (error) {
+    console.error('❌ Error saving factory:', error.message);
+  }
+  next(error);
+});
+
+// ============ POST-FINDONEANDUPDATE MIDDLEWARE ============
+
+factorySchema.post('findOneAndUpdate', function(doc) {
+  if (doc) {
+    console.log('✅ Factory updated successfully:', doc._id);
+  }
 });
 
 // ============ METHODS ============
@@ -103,10 +253,19 @@ factorySchema.methods.toPublicJSON = function() {
     companyId: this.companyId,
     description: this.description,
     contactEmail: this.contactEmail,
+    contactPhone: this.contactPhone,
     address: this.address,
     status: this.status,
     isActive: this.isActive,
-    createdAt: this.createdAt
+    createdAt: this.createdAt,
+    updatedAt: this.updatedAt
+  };
+};
+
+factorySchema.methods.toAdminJSON = function() {
+  return {
+    ...this.toPublicJSON(),
+    deletedAt: this.deletedAt
   };
 };
 
@@ -151,6 +310,54 @@ factorySchema.statics.search = function(searchTerm, companyId) {
   };
   if (companyId) query.companyId = companyId;
   return this.find(query);
+};
+
+factorySchema.statics.getStats = async function(companyId) {
+  const match = { deletedAt: null };
+  if (companyId) match.companyId = companyId;
+  
+  const stats = await this.aggregate([
+    { $match: match },
+    {
+      $group: {
+        _id: null,
+        total: { $sum: 1 },
+        active: {
+          $sum: {
+            $cond: [{ $eq: ['$status', 'active'] }, 1, 0]
+          }
+        },
+        inactive: {
+          $sum: {
+            $cond: [{ $eq: ['$status', 'inactive'] }, 1, 0]
+          }
+        },
+        archived: {
+          $sum: {
+            $cond: [{ $eq: ['$status', 'archived'] }, 1, 0]
+          }
+        }
+      }
+    }
+  ]);
+  
+  return stats[0] || { total: 0, active: 0, inactive: 0, archived: 0 };
+};
+
+factorySchema.statics.getIndustryDistribution = async function(companyId) {
+  const match = { deletedAt: null };
+  if (companyId) match.companyId = companyId;
+  
+  return this.aggregate([
+    { $match: match },
+    {
+      $group: {
+        _id: '$industry',
+        count: { $sum: 1 }
+      }
+    },
+    { $sort: { count: -1 } }
+  ]);
 };
 
 // ============ EXPORT ============

@@ -33,7 +33,7 @@ class BaseModel {
    * @param {mongoose.Schema} schema - مخطط Mongoose
    */
   static applySoftDelete(schema) {
-    // فلترة المستندات غير المحذوفة في findAll
+    // ✅ استخدام function العادية بدلاً من arrow functions
     schema.pre('find', function() {
       this.where({ deletedAt: null });
     });
@@ -137,33 +137,86 @@ class BaseModel {
    * @param {mongoose.Schema} schema - مخطط Mongoose
    */
   static applyCommonSettings(schema) {
-    // ⚠️ تم تعطيل Pre-save middleware مؤقتاً لحل مشكلة "next is not a function"
-    // سيتم إعادة تفعيلها بعد تحديث Mongoose
-    // schema.pre('save', function(next) {
-    //   try {
-    //     this.updatedAt = new Date();
-    //     next();
-    //   } catch (error) {
-    //     next(error);
-    //   }
-    // });
+    // ✅ إضافة Pre-save middleware بشكل صحيح مع try/catch
+    schema.pre('save', function(next) {
+      try {
+        // تحديث updatedAt تلقائياً
+        this.updatedAt = new Date();
+        return next();
+      } catch (error) {
+        return next(error);
+      }
+    });
 
-    // schema.pre('save', function(next) {
-    //   try {
-    //     if (this.email) {
-    //       this.email = this.email.toLowerCase().trim();
-    //     }
-    //     if (this.name) {
-    //       this.name = this.name.trim();
-    //     }
-    //     if (this.code) {
-    //       this.code = this.code.toUpperCase().trim();
-    //     }
-    //     next();
-    //   } catch (error) {
-    //     next(error);
-    //   }
-    // });
+    // ✅ Pre-validate middleware للتحقق من البيانات
+    schema.pre('validate', function(next) {
+      try {
+        if (this.email) {
+          this.email = this.email.toLowerCase().trim();
+        }
+        if (this.name) {
+          this.name = this.name.trim();
+        }
+        if (this.code) {
+          this.code = this.code.toUpperCase().trim();
+        }
+        if (this.displayName) {
+          this.displayName = this.displayName.trim();
+        }
+        return next();
+      } catch (error) {
+        return next(error);
+      }
+    });
+
+    // ✅ Pre-findOneAndUpdate middleware
+    schema.pre('findOneAndUpdate', function(next) {
+      try {
+        this.set({ updatedAt: new Date() });
+        return next();
+      } catch (error) {
+        return next(error);
+      }
+    });
+
+    // ✅ Pre-updateOne middleware
+    schema.pre('updateOne', function(next) {
+      try {
+        this.set({ updatedAt: new Date() });
+        return next();
+      } catch (error) {
+        return next(error);
+      }
+    });
+
+    // ✅ Pre-updateMany middleware
+    schema.pre('updateMany', function(next) {
+      try {
+        this.set({ updatedAt: new Date() });
+        return next();
+      } catch (error) {
+        return next(error);
+      }
+    });
+
+    // ✅ Post-save middleware للـ Logging
+    schema.post('save', function(doc) {
+      console.log(`✅ ${doc.constructor.modelName} saved successfully:`, doc._id);
+    });
+
+    schema.post('save', function(error, doc, next) {
+      if (error) {
+        console.error(`❌ Error saving ${doc.constructor.modelName}:`, error.message);
+      }
+      next(error);
+    });
+
+    // ✅ Post-findOneAndUpdate middleware للـ Logging
+    schema.post('findOneAndUpdate', function(doc) {
+      if (doc) {
+        console.log(`✅ ${doc.constructor.modelName} updated successfully:`, doc._id);
+      }
+    });
 
     // إضافة دوال عامة
     schema.methods.toJSON = function() {

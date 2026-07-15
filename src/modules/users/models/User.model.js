@@ -286,6 +286,136 @@ userSchema.virtual('isTwoFactorEnabled').get(function() {
   return this.twoFactorEnabled;
 });
 
+// ============ PRE-SAVE MIDDLEWARE ============
+// ✅ تم التعليق لأن BaseModel يوفر Pre-save middleware
+// تجنباً لتكرار Pre-save hooks
+
+/*
+userSchema.pre('save', function(next) {
+  try {
+    this.updatedAt = new Date();
+    
+    if (this.isModified('firstName') || this.isModified('lastName')) {
+      if (this.firstName && this.lastName) {
+        this.displayName = `${this.firstName} ${this.lastName}`;
+      } else if (this.firstName) {
+        this.displayName = this.firstName;
+      } else if (this.lastName) {
+        this.displayName = this.lastName;
+      }
+    }
+    
+    if (this.isModified('email') && this.email) {
+      this.email = this.email.toLowerCase().trim();
+    }
+    
+    if (!this.firebaseUid || this.firebaseUid === '') {
+      this.firebaseUid = `firebase_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    }
+    
+    if (this.isModified('lockedUntil') && !this.lockedUntil) {
+      this.failedLoginAttempts = 0;
+    }
+    
+    return next();
+  } catch (error) {
+    return next(error);
+  }
+});
+*/
+
+// ============ PRE-VALIDATE MIDDLEWARE ============
+// ✅ تم التعليق لأن BaseModel يوفر Pre-validate
+
+/*
+userSchema.pre('validate', function(next) {
+  try {
+    if (this.email) {
+      this.email = this.email.toLowerCase().trim();
+    }
+    
+    if (this.displayName) {
+      this.displayName = this.displayName.trim();
+    }
+    
+    if (this.firstName) {
+      this.firstName = this.firstName.trim();
+    }
+    
+    if (this.lastName) {
+      this.lastName = this.lastName.trim();
+    }
+    
+    return next();
+  } catch (error) {
+    return next(error);
+  }
+});
+*/
+
+// ============ PRE-FINDONEANDUPDATE MIDDLEWARE ============
+// ✅ تم التعليق لأن BaseModel يوفر Pre-findOneAndUpdate
+
+/*
+userSchema.pre('findOneAndUpdate', function(next) {
+  try {
+    this.set({ updatedAt: new Date() });
+    return next();
+  } catch (error) {
+    return next(error);
+  }
+});
+*/
+
+// ============ PRE-UPDATEONE MIDDLEWARE ============
+// ✅ تم التعليق لأن BaseModel يوفر Pre-updateOne
+
+/*
+userSchema.pre('updateOne', function(next) {
+  try {
+    this.set({ updatedAt: new Date() });
+    return next();
+  } catch (error) {
+    return next(error);
+  }
+});
+*/
+
+// ============ PRE-UPDATEMANY MIDDLEWARE ============
+// ✅ تم التعليق لأن BaseModel يوفر Pre-updateMany
+
+/*
+userSchema.pre('updateMany', function(next) {
+  try {
+    this.set({ updatedAt: new Date() });
+    return next();
+  } catch (error) {
+    return next(error);
+  }
+});
+*/
+
+// ============ POST-SAVE MIDDLEWARE ============
+
+userSchema.post('save', function(doc) {
+  console.log('✅ User saved successfully:', doc._id);
+});
+
+userSchema.post('save', function(error, doc, next) {
+  if (error) {
+    console.error('❌ Error saving user:', error.message);
+  }
+  next(error);
+});
+
+// ============ POST-FINDONEANDUPDATE MIDDLEWARE ============
+
+userSchema.post('findOneAndUpdate', function(doc) {
+  if (doc) {
+    console.log('✅ User updated successfully:', doc._id);
+  }
+});
+
 // ============ METHODS ============
 
 userSchema.methods.recordLogin = async function(ip, userAgent, deviceInfo = {}) {
@@ -603,21 +733,6 @@ userSchema.statics.getStats = async function(companyId) {
     activeToday: 0
   };
 };
-
-// ============ PRE-SAVE MIDDLEWARE (محذوف - BaseModel بيتعامل مع updatedAt) ============
-
-// ============ POST-SAVE MIDDLEWARE (Mongoose 9.7.4) ============
-
-userSchema.post('save', function(doc) {
-  console.log('✅ User saved successfully:', doc._id);
-});
-
-userSchema.post('save', function(error, doc, next) {
-  if (error) {
-    console.error('❌ Error saving user:', error.message);
-  }
-  next(error);
-});
 
 // ============ EXPORT ============
 
