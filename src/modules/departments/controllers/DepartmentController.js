@@ -30,7 +30,7 @@ const createDepartmentSchema = Joi.object({
     'environmental', 'logistics', 'research', 'administration',
     'hr', 'it', 'finance', 'procurement', 'sales', 'marketing', 'other'
   ).required(),
-  factoryId: Joi.string().uuid({ version: 'uuidv4' }).required(),
+  factoryId: Joi.string().required(),
   departmentHead: Joi.object({
     name: Joi.string().optional(),
     email: Joi.string().email().optional(),
@@ -134,7 +134,7 @@ const filterSchema = Joi.object({
     'environmental', 'logistics', 'research', 'administration',
     'hr', 'it', 'finance', 'procurement', 'sales', 'marketing', 'other'
   ),
-  factoryId: Joi.string().uuid({ version: 'uuidv4' }),
+  factoryId: Joi.string(),
   minGreenScore: Joi.number().min(0).max(100),
   maxGreenScore: Joi.number().min(0).max(100),
   tag: Joi.string(),
