@@ -1,4 +1,3 @@
- 
 const BaseService = require('../../../core/base/BaseService');
 const CompanyRepository = require('../repositories/CompanyRepository');
 const {
@@ -31,6 +30,11 @@ class CompanyService extends BaseService {
     try {
       // 1. التحقق من الحقول المطلوبة
       this.validateRequiredFields(data, ['name', 'code', 'industry', 'contactEmail']);
+
+      // ✅ التأكد من وجود companyId (للتسلسل الهرمي)
+      if (!data.companyId) {
+        data.companyId = `comp_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+      }
 
       // 2. التحقق من عدم وجود شركة بنفس الاسم
       const existingName = await this.repository.findByName(data.name);
@@ -162,6 +166,62 @@ class CompanyService extends BaseService {
   }
 
   /**
+   * الحصول على شركة مع إحصائيات محسوبة ديناميكياً
+   */
+  async getCompanyWithStats(id) {
+    const company = await this.repository.findById(id);
+    if (!company) {
+      throw new NotFoundError('Company not found');
+    }
+
+    // جلب الإحصائيات الحقيقية من قاعدة البيانات
+    const Factory = require('../../factories/models/Factory.model');
+    const Department = require('../../departments/models/Department.model');
+    const Machine = require('../../machines/models/Machine.model');
+    const Sensor = require('../../sensors/models/Sensor.model');
+    const User = require('../../users/models/User.model');
+    const SensorReading = require('../../sensorReadings/models/SensorReading.model');
+    const Alert = require('../../alerts/models/Alert.model');
+    const Report = require('../../reports/models/Report.model');
+
+    const [
+      factories,
+      departments,
+      machines,
+      sensors,
+      users,
+      readings,
+      alerts,
+      reports
+    ] = await Promise.all([
+      Factory.countDocuments({ companyId: id, deletedAt: null }),
+      Department.countDocuments({ companyId: id, deletedAt: null }),
+      Machine.countDocuments({ companyId: id, deletedAt: null }),
+      Sensor.countDocuments({ companyId: id, deletedAt: null }),
+      User.countDocuments({ companyId: id, deletedAt: null }),
+      SensorReading.countDocuments({ companyId: id, deletedAt: null }),
+      Alert.countDocuments({ companyId: id, deletedAt: null }),
+      Report.countDocuments({ companyId: id, deletedAt: null })
+    ]);
+
+    // تحديث الإحصائيات في الكائن قبل الـ Response
+    company.statistics = {
+      ...company.statistics,
+      totalFactories: factories,
+      totalDepartments: departments,
+      totalMachines: machines,
+      totalSensors: sensors,
+      totalUsers: users,
+      totalReadings: readings,
+      totalAlerts: alerts,
+      totalReports: reports,
+      lastUpdated: new Date()
+    };
+
+    return company;
+  }
+
+  /**
    * الحصول على شركة بالكود
    */
   async getCompanyByCode(code) {
@@ -191,10 +251,28 @@ class CompanyService extends BaseService {
   }
 
   /**
-   * الحصول على قائمة الشركات مع Pagination
+   * الحصول على قائمة الشركات مع Pagination وإحصائيات محسوبة
    */
   async getCompaniesPaginated(page, limit, filter = {}) {
-    return this.repository.paginate(filter, null, page, limit);
+    const result = await this.repository.paginate(filter, null, page, limit);
+    
+    // حساب الإحصائيات لكل شركة
+    const enrichedData = await Promise.all(
+      result.data.map(async (company) => {
+        try {
+          const enriched = await this.getCompanyWithStats(company._id);
+          return enriched;
+        } catch (error) {
+          logger.warn(`Failed to get stats for company ${company._id}:`, error.message);
+          return company;
+        }
+      })
+    );
+
+    return {
+      data: enrichedData,
+      meta: result.meta
+    };
   }
 
   /**
@@ -855,6 +933,53 @@ class CompanyService extends BaseService {
       createdAt: company.createdAt,
       status: company.status
     };
+  }
+
+  /**
+   * تحديث إحصائيات الشركة يدوياً (للاستخدام من الـ Hooks)
+   */
+  async refreshCompanyStatistics(companyId) {
+    try {
+      if (!companyId) return null;
+
+      const Factory = require('../../factories/models/Factory.model');
+      const Department = require('../../departments/models/Department.model');
+      const Machine = require('../../machines/models/Machine.model');
+      const Sensor = require('../../sensors/models/Sensor.model');
+      const User = require('../../users/models/User.model');
+
+      const [factories, departments, machines, sensors, users] = await Promise.all([
+        Factory.countDocuments({ companyId, deletedAt: null }),
+        Department.countDocuments({ companyId, deletedAt: null }),
+        Machine.countDocuments({ companyId, deletedAt: null }),
+        Sensor.countDocuments({ companyId, deletedAt: null }),
+        User.countDocuments({ companyId, deletedAt: null })
+      ]);
+
+      const updatedCompany = await this.repository.updateStatistics(companyId, {
+        totalFactories: factories,
+        totalDepartments: departments,
+        totalMachines: machines,
+        totalSensors: sensors,
+        totalUsers: users
+      });
+
+      logger.info('Company statistics refreshed', {
+        companyId,
+        statistics: {
+          totalFactories: factories,
+          totalDepartments: departments,
+          totalMachines: machines,
+          totalSensors: sensors,
+          totalUsers: users
+        }
+      });
+
+      return updatedCompany;
+    } catch (error) {
+      logger.error('Error refreshing company statistics:', error);
+      throw error;
+    }
   }
 }
 

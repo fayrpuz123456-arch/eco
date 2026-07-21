@@ -49,6 +49,53 @@ const authMiddleware = async (req, res, next) => {
         logger.warn('Could not fetch user from MongoDB:', dbError.message);
       }
 
+      // ✅ **لو المستخدم مش موجود في MongoDB، أنشئه تلقائياً**
+      if (!userFromDB) {
+        try {
+          const newUser = new User({
+            email: firebaseUser.email,
+            displayName: firebaseUser.displayName || firebaseUser.email || 'User',
+            firebaseUid: firebaseUser.uid,
+            emailVerified: firebaseUser.emailVerified || false,
+            role: 'viewer',
+            permissions: [],
+            companyId: req.headers['x-company-id'] || 'comp_test_001',
+            status: 'active'
+          });
+          userFromDB = await newUser.save();
+          logger.info('✅ User auto-created from Firebase:', { 
+            uid: firebaseUser.uid, 
+            email: firebaseUser.email 
+          });
+        } catch (createError) {
+          logger.error('❌ Failed to auto-create user:', createError.message);
+        }
+      }
+
+      // ✅ **تحديد الـ Role والـ Permissions من MongoDB**
+      let userRole = 'viewer';
+      let userPermissions = [];
+
+      if (userFromDB) {
+        userRole = userFromDB.role || 'viewer';
+        userPermissions = userFromDB.permissions || [];
+        
+        // ✅ لو الـ role admin ومفيش permissions، أضفهم تلقائياً
+        if (userRole === 'admin' && userPermissions.length === 0) {
+          userPermissions = ['*'];
+          await User.updateOne(
+            { _id: userFromDB._id },
+            { $set: { permissions: ['*'] } }
+          );
+          logger.info('✅ Auto-added permissions for admin:', userFromDB.email);
+        }
+        
+        // ✅ لو super_admin، أضف كل الصلاحيات
+        if (userRole === 'super_admin') {
+          userPermissions = ['*'];
+        }
+      }
+
       // 5. بناء كائن المستخدم
       req.user = {
         id: firebaseUser.uid,
@@ -57,15 +104,13 @@ const authMiddleware = async (req, res, next) => {
         emailVerified: firebaseUser.emailVerified || false,
         phoneNumber: firebaseUser.phoneNumber || null,
         photoURL: firebaseUser.photoURL || null,
-        // ✅ الأولوية: MongoDB Role > Firebase Claims > default
-        role: userFromDB?.role || decodedToken.claims?.role || 'viewer',
-        permissions: userFromDB?.permissions || decodedToken.claims?.permissions || [],
+        role: userRole,
+        permissions: userPermissions,
         claims: decodedToken.claims || {},
         metadata: {
           lastSignInTime: firebaseUser.metadata?.lastSignInTime || null,
           creationTime: firebaseUser.metadata?.creationTime || null
         },
-        // ✅ إضافة data من MongoDB
         mongoData: userFromDB || null
       };
 
@@ -73,13 +118,14 @@ const authMiddleware = async (req, res, next) => {
       req.companyId = req.headers['x-company-id'] || 
                       decodedToken.claims?.companyId || 
                       userFromDB?.companyId ||
-                      null;
+                      'comp_test_001';
 
       // 7. تسجيل نجاح المصادقة
       logger.debug('User authenticated successfully', {
         userId: req.user.id,
         email: req.user.email,
         role: req.user.role,
+        permissions: req.user.permissions,
         companyId: req.companyId,
         ip: req.ip,
         path: req.path
@@ -143,12 +189,28 @@ const optionalAuthMiddleware = async (req, res, next) => {
           // تجاهل
         }
         
+        // ✅ تحديد الـ Role والـ Permissions
+        let userRole = 'viewer';
+        let userPermissions = [];
+        
+        if (userFromDB) {
+          userRole = userFromDB.role || 'viewer';
+          userPermissions = userFromDB.permissions || [];
+          
+          if (userRole === 'admin' && userPermissions.length === 0) {
+            userPermissions = ['*'];
+          }
+          if (userRole === 'super_admin') {
+            userPermissions = ['*'];
+          }
+        }
+        
         req.user = {
           id: firebaseUser.uid,
           email: firebaseUser.email,
           displayName: firebaseUser.displayName || firebaseUser.email,
-          role: userFromDB?.role || decodedToken.claims?.role || 'viewer',
-          permissions: userFromDB?.permissions || decodedToken.claims?.permissions || [],
+          role: userRole,
+          permissions: userPermissions,
           claims: decodedToken.claims || {},
           mongoData: userFromDB || null
         };
@@ -156,7 +218,7 @@ const optionalAuthMiddleware = async (req, res, next) => {
         req.companyId = req.headers['x-company-id'] || 
                         decodedToken.claims?.companyId || 
                         userFromDB?.companyId ||
-                        null;
+                        'comp_test_001';
         
         logger.debug('Optional auth: User authenticated', {
           userId: req.user.id,
@@ -197,12 +259,13 @@ const checkPermissions = (requiredPermissions = []) => {
         return next();
       }
 
-      // ✅ الحصول على صلاحيات المستخدم من MongoDB أو Firebase Claims
-      const userPermissions = req.user.permissions || req.user.claims?.permissions || [];
-      const userRole = req.user.role || req.user.claims?.role || 'viewer';
+      // ✅ الحصول على صلاحيات المستخدم من MongoDB
+      const userPermissions = req.user.permissions || [];
+      const userRole = req.user.role || 'viewer';
 
-      // التحقق من صلاحيات الإداري
-      if (userRole === 'admin' || userRole === 'super_admin') {
+      // ✅ التحقق من صلاحيات الإداري (مهم: super_admin و admin)
+      if (userRole === 'super_admin' || userRole === 'admin') {
+        // ✅ لو admin ومطلوب صلاحية معينة، نسمح (admin عنده كل الصلاحيات)
         return next();
       }
 
@@ -248,8 +311,8 @@ const checkRole = (allowedRoles = []) => {
         return sendUnauthorized(res, 'Authentication required.');
       }
 
-      // ✅ الحصول على الدور من MongoDB أو Firebase Claims
-      const userRole = req.user.role || req.user.claims?.role || 'viewer';
+      // ✅ الحصول على الدور من MongoDB
+      const userRole = req.user.role || 'viewer';
 
       if (allowedRoles.includes(userRole)) {
         return next();
@@ -298,9 +361,9 @@ const checkCompanyAccess = (getCompanyIdFromParams = true) => {
         return sendError(res, 400, 'Company ID is required.');
       }
 
-      // ✅ الحصول على companyId من MongoDB أو Firebase Claims
-      const userCompanyId = req.companyId || req.user.claims?.companyId || req.user.mongoData?.companyId;
-      const userRole = req.user.role || req.user.claims?.role || 'viewer';
+      // ✅ الحصول على companyId من MongoDB
+      const userCompanyId = req.companyId || req.user.mongoData?.companyId;
+      const userRole = req.user.role || 'viewer';
 
       // الإداري يمكنه الوصول لكل الشركات
       if (userRole === 'admin' || userRole === 'super_admin') {
@@ -350,7 +413,7 @@ const checkFactoryAccess = () => {
         return next(); // لا يوجد مصنع محدد، نسمح بالمرور
       }
 
-      const userRole = req.user.role || req.user.claims?.role || 'viewer';
+      const userRole = req.user.role || 'viewer';
       
       // الإداري يمكنه الوصول لكل المصانع
       if (userRole === 'admin' || userRole === 'super_admin') {
@@ -359,7 +422,7 @@ const checkFactoryAccess = () => {
       }
 
       // التحقق من أن المستخدم لديه حق الوصول لهذا المصنع
-      const userFactoryIds = req.user.factoryIds || req.user.claims?.factoryIds || [];
+      const userFactoryIds = req.user.mongoData?.factoryIds || [];
       
       if (userFactoryIds.includes(factoryId)) {
         req.targetFactoryId = factoryId;
@@ -401,7 +464,7 @@ const checkOwnUser = () => {
         return next();
       }
 
-      const userRole = req.user.role || req.user.claims?.role || 'viewer';
+      const userRole = req.user.role || 'viewer';
       
       // الإداري يمكنه الوصول لكل المستخدمين
       if (userRole === 'admin' || userRole === 'super_admin') {

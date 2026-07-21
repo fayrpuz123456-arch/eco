@@ -5,10 +5,6 @@ const { v4: uuidv4 } = require('uuid');
  * النموذج الأساسي - يوفر وظائف مشتركة لجميع النماذج
  */
 class BaseModel {
-  /**
-   * الحصول على مخطط النموذج الأساسي
-   * @returns {Object} - مخطط النموذج
-   */
   static getSchema() {
     return {
       _id: { type: String, default: () => uuidv4() },
@@ -28,28 +24,23 @@ class BaseModel {
     };
   }
 
-  /**
-   * تطبيق الحذف الناعم (Soft Delete) على المخطط
-   * @param {mongoose.Schema} schema - مخطط Mongoose
-   */
   static applySoftDelete(schema) {
-    // ✅ استخدام function العادية بدلاً من arrow functions
     schema.pre('find', function() {
       this.where({ deletedAt: null });
     });
-    
+
     schema.pre('findOne', function() {
       this.where({ deletedAt: null });
     });
-    
+
     schema.pre('findOneAndUpdate', function() {
       this._conditions.deletedAt = null;
     });
-    
+
     schema.pre('countDocuments', function() {
       this.where({ deletedAt: null });
     });
-    
+
     schema.pre('aggregate', function() {
       if (this.pipeline().length > 0) {
         const firstStage = this.pipeline()[0];
@@ -61,7 +52,6 @@ class BaseModel {
       }
     });
 
-    // إضافة دوال للمستند
     schema.methods.softDelete = async function(deletedBy = null, reason = null) {
       this.deletedAt = new Date();
       this.status = 'archived';
@@ -80,7 +70,6 @@ class BaseModel {
       return this.deletedAt !== null;
     };
 
-    // إضافة دوال ثابتة
     schema.statics.findActive = function(filter = {}) {
       return this.find({ ...filter, deletedAt: null });
     };
@@ -105,10 +94,6 @@ class BaseModel {
     };
   }
 
-  /**
-   * الحصول على الفهارس الموصى بها
-   * @returns {Array} - قائمة الفهارس
-   */
   static getIndexes() {
     return [
       { fields: { companyId: 1 } },
@@ -118,13 +103,9 @@ class BaseModel {
     ];
   }
 
-  /**
-   * إنشاء الفهارس على النموذج
-   * @param {mongoose.Model} model - نموذج Mongoose
-   */
   static async createIndexes(model) {
     if (!model || !model.schema) return;
-    
+
     const indexes = this.getIndexes();
     for (const index of indexes) {
       model.schema.index(index.fields, index.options || {});
@@ -132,93 +113,76 @@ class BaseModel {
     await model.syncIndexes();
   }
 
-  /**
-   * تطبيق الإعدادات المشتركة على المخطط
-   * @param {mongoose.Schema} schema - مخطط Mongoose
-   */
   static applyCommonSettings(schema) {
-    // ✅ إضافة Pre-save middleware بشكل صحيح مع try/catch
-    schema.pre('save', function(next) {
-      try {
-        // تحديث updatedAt تلقائياً
-        this.updatedAt = new Date();
-        return next();
-      } catch (error) {
-        return next(error);
+    // Pre-save middleware
+    // ✅ لا نستخدم next() اليدوي هنا؛ في نسخ Mongoose الحديثة الـ hooks بدون
+    // باراميتر next تُعامل كـ sync/async تلقائيًا، وأي throw بيتحول لـ rejection صح.
+    schema.pre('save', function() {
+      this.updatedAt = new Date();
+    });
+
+    // Pre-validate middleware
+    schema.pre('validate', function() {
+      if (this.email) {
+        this.email = String(this.email).toLowerCase().trim();
+      }
+      if (this.name) {
+        this.name = String(this.name).trim();
+      }
+      if (this.code) {
+        this.code = String(this.code).toUpperCase().trim();
+      }
+      if (this.displayName) {
+        this.displayName = String(this.displayName).trim();
       }
     });
 
-    // ✅ Pre-validate middleware للتحقق من البيانات
-    schema.pre('validate', function(next) {
-      try {
-        if (this.email) {
-          this.email = this.email.toLowerCase().trim();
-        }
-        if (this.name) {
-          this.name = this.name.trim();
-        }
-        if (this.code) {
-          this.code = this.code.toUpperCase().trim();
-        }
-        if (this.displayName) {
-          this.displayName = this.displayName.trim();
-        }
-        return next();
-      } catch (error) {
-        return next(error);
-      }
+    // Pre-findOneAndUpdate middleware
+    schema.pre('findOneAndUpdate', function() {
+      this.set({ updatedAt: new Date() });
     });
 
-    // ✅ Pre-findOneAndUpdate middleware
-    schema.pre('findOneAndUpdate', function(next) {
-      try {
-        this.set({ updatedAt: new Date() });
-        return next();
-      } catch (error) {
-        return next(error);
-      }
+    // Pre-updateOne middleware
+    schema.pre('updateOne', function() {
+      this.set({ updatedAt: new Date() });
     });
 
-    // ✅ Pre-updateOne middleware
-    schema.pre('updateOne', function(next) {
-      try {
-        this.set({ updatedAt: new Date() });
-        return next();
-      } catch (error) {
-        return next(error);
-      }
+    // Pre-updateMany middleware
+    schema.pre('updateMany', function() {
+      this.set({ updatedAt: new Date() });
     });
 
-    // ✅ Pre-updateMany middleware
-    schema.pre('updateMany', function(next) {
-      try {
-        this.set({ updatedAt: new Date() });
-        return next();
-      } catch (error) {
-        return next(error);
-      }
-    });
-
-    // ✅ Post-save middleware للـ Logging
+    // ✅ Post-save - Success
     schema.post('save', function(doc) {
       console.log(`✅ ${doc.constructor.modelName} saved successfully:`, doc._id);
     });
 
+    // ✅ Post-save - Error Handler (error-handling middleware لازم تفضل بنفس الشكل: (error, doc, next))
     schema.post('save', function(error, doc, next) {
       if (error) {
         console.error(`❌ Error saving ${doc.constructor.modelName}:`, error.message);
+        return next(error);
       }
-      next(error);
+      next();
     });
 
-    // ✅ Post-findOneAndUpdate middleware للـ Logging
+    // ✅ Post-findOneAndUpdate - Success
     schema.post('findOneAndUpdate', function(doc) {
       if (doc) {
         console.log(`✅ ${doc.constructor.modelName} updated successfully:`, doc._id);
       }
     });
 
-    // إضافة دوال عامة
+    // ✅ Post-findOneAndUpdate - Error Handler
+    schema.post('findOneAndUpdate', function(error, doc, next) {
+      if (error) {
+        console.error(`❌ Error updating ${doc.constructor.modelName}:`, error.message);
+        return next(error);
+      }
+      next();
+    });
+
+    // عامة
     schema.methods.toJSON = function() {
       const obj = this.toObject();
       delete obj.__v;
@@ -234,12 +198,6 @@ class BaseModel {
     };
   }
 
-  /**
-   * إنشاء مخطط جديد مع التطبيقات الأساسية
-   * @param {Object} customSchema - مخطط مخصص
-   * @param {Object} options - خيارات إضافية
-   * @returns {mongoose.Schema} - مخطط Mongoose
-   */
   static createSchema(customSchema = {}, options = {}) {
     const schema = new mongoose.Schema(
       {
@@ -261,10 +219,7 @@ class BaseModel {
       }
     );
 
-    // تطبيق الحذف الناعم
     this.applySoftDelete(schema);
-    
-    // تطبيق الإعدادات المشتركة
     this.applyCommonSettings(schema);
 
     return schema;

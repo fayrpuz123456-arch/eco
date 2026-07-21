@@ -156,125 +156,7 @@ const ROLES = {
   admin: {
     name: 'Admin',
     description: 'Company administrator with full access to company data',
-    permissions: [
-      // Users
-      PERMISSIONS.USERS_VIEW,
-      PERMISSIONS.USERS_CREATE,
-      PERMISSIONS.USERS_UPDATE,
-      PERMISSIONS.USERS_DELETE,
-      PERMISSIONS.USERS_MANAGE,
-      
-      // Companies
-      PERMISSIONS.COMPANIES_VIEW,
-      PERMISSIONS.COMPANIES_UPDATE,
-      PERMISSIONS.COMPANIES_MANAGE,
-      
-      // Factories
-      PERMISSIONS.FACTORIES_VIEW,
-      PERMISSIONS.FACTORIES_CREATE,
-      PERMISSIONS.FACTORIES_UPDATE,
-      PERMISSIONS.FACTORIES_DELETE,
-      PERMISSIONS.FACTORIES_MANAGE,
-      
-      // Departments
-      PERMISSIONS.DEPARTMENTS_VIEW,
-      PERMISSIONS.DEPARTMENTS_CREATE,
-      PERMISSIONS.DEPARTMENTS_UPDATE,
-      PERMISSIONS.DEPARTMENTS_DELETE,
-      PERMISSIONS.DEPARTMENTS_MANAGE,
-      
-      // Production Lines
-      PERMISSIONS.PRODUCTION_LINES_VIEW,
-      PERMISSIONS.PRODUCTION_LINES_CREATE,
-      PERMISSIONS.PRODUCTION_LINES_UPDATE,
-      PERMISSIONS.PRODUCTION_LINES_DELETE,
-      PERMISSIONS.PRODUCTION_LINES_MANAGE,
-      
-      // Machines
-      PERMISSIONS.MACHINES_VIEW,
-      PERMISSIONS.MACHINES_CREATE,
-      PERMISSIONS.MACHINES_UPDATE,
-      PERMISSIONS.MACHINES_DELETE,
-      PERMISSIONS.MACHINES_MANAGE,
-      
-      // Sensors
-      PERMISSIONS.SENSORS_VIEW,
-      PERMISSIONS.SENSORS_CREATE,
-      PERMISSIONS.SENSORS_UPDATE,
-      PERMISSIONS.SENSORS_DELETE,
-      PERMISSIONS.SENSORS_MANAGE,
-      PERMISSIONS.SENSORS_READINGS_VIEW,
-      PERMISSIONS.SENSORS_READINGS_EXPORT,
-      
-      // Sustainability
-      PERMISSIONS.CARBON_VIEW,
-      PERMISSIONS.CARBON_MANAGE,
-      PERMISSIONS.ENERGY_VIEW,
-      PERMISSIONS.ENERGY_MANAGE,
-      PERMISSIONS.WATER_VIEW,
-      PERMISSIONS.WATER_MANAGE,
-      PERMISSIONS.WASTE_VIEW,
-      PERMISSIONS.WASTE_MANAGE,
-      
-      // Reports
-      PERMISSIONS.REPORTS_VIEW,
-      PERMISSIONS.REPORTS_CREATE,
-      PERMISSIONS.REPORTS_UPDATE,
-      PERMISSIONS.REPORTS_DELETE,
-      PERMISSIONS.REPORTS_EXPORT,
-      PERMISSIONS.REPORTS_MANAGE,
-      
-      // Alerts
-      PERMISSIONS.ALERTS_VIEW,
-      PERMISSIONS.ALERTS_CREATE,
-      PERMISSIONS.ALERTS_UPDATE,
-      PERMISSIONS.ALERTS_DELETE,
-      PERMISSIONS.ALERTS_ACKNOWLEDGE,
-      PERMISSIONS.ALERTS_RESOLVE,
-      PERMISSIONS.ALERTS_MANAGE,
-      
-      // Notifications
-      PERMISSIONS.NOTIFICATIONS_VIEW,
-      PERMISSIONS.NOTIFICATIONS_SEND,
-      PERMISSIONS.NOTIFICATIONS_MANAGE,
-      
-      // Plugins
-      PERMISSIONS.PLUGINS_VIEW,
-      PERMISSIONS.PLUGINS_ENABLE,
-      PERMISSIONS.PLUGINS_DISABLE,
-      
-      // Settings
-      PERMISSIONS.SETTINGS_VIEW,
-      PERMISSIONS.SETTINGS_UPDATE,
-      PERMISSIONS.SETTINGS_MANAGE,
-      
-      // Audit
-      PERMISSIONS.AUDIT_VIEW,
-      PERMISSIONS.AUDIT_EXPORT,
-      
-      // Exchange
-      PERMISSIONS.EXCHANGE_VIEW,
-      PERMISSIONS.EXCHANGE_CREATE,
-      PERMISSIONS.EXCHANGE_UPDATE,
-      PERMISSIONS.EXCHANGE_DELETE,
-      PERMISSIONS.EXCHANGE_APPROVE,
-      PERMISSIONS.EXCHANGE_MANAGE,
-      
-      // Heat Recovery
-      PERMISSIONS.HEAT_RECOVERY_VIEW,
-      PERMISSIONS.HEAT_RECOVERY_CREATE,
-      PERMISSIONS.HEAT_RECOVERY_UPDATE,
-      PERMISSIONS.HEAT_RECOVERY_DELETE,
-      PERMISSIONS.HEAT_RECOVERY_MANAGE,
-      
-      // Digital Twin
-      PERMISSIONS.DIGITAL_TWIN_VIEW,
-      PERMISSIONS.DIGITAL_TWIN_MANAGE,
-      
-      // AI
-      PERMISSIONS.AI_VIEW,
-      PERMISSIONS.AI_MANAGE
-    ],
+    permissions: Object.values(PERMISSIONS), // ✅ admin عنده كل الصلاحيات
     isAdmin: true
   },
   
@@ -283,62 +165,39 @@ const ROLES = {
     name: 'Manager',
     description: 'Department manager with limited administrative access',
     permissions: [
-      // Users
       PERMISSIONS.USERS_VIEW,
       PERMISSIONS.USERS_CREATE,
       PERMISSIONS.USERS_UPDATE,
-      
-      // Factories
       PERMISSIONS.FACTORIES_VIEW,
-      
-      // Departments
       PERMISSIONS.DEPARTMENTS_VIEW,
       PERMISSIONS.DEPARTMENTS_UPDATE,
-      
-      // Production Lines
       PERMISSIONS.PRODUCTION_LINES_VIEW,
       PERMISSIONS.PRODUCTION_LINES_CREATE,
       PERMISSIONS.PRODUCTION_LINES_UPDATE,
-      
-      // Machines
       PERMISSIONS.MACHINES_VIEW,
       PERMISSIONS.MACHINES_CREATE,
       PERMISSIONS.MACHINES_UPDATE,
-      
-      // Sensors
       PERMISSIONS.SENSORS_VIEW,
       PERMISSIONS.SENSORS_CREATE,
       PERMISSIONS.SENSORS_UPDATE,
       PERMISSIONS.SENSORS_READINGS_VIEW,
       PERMISSIONS.SENSORS_READINGS_EXPORT,
-      
-      // Sustainability
       PERMISSIONS.CARBON_VIEW,
       PERMISSIONS.ENERGY_VIEW,
       PERMISSIONS.WATER_VIEW,
       PERMISSIONS.WASTE_VIEW,
-      
-      // Reports
       PERMISSIONS.REPORTS_VIEW,
       PERMISSIONS.REPORTS_CREATE,
       PERMISSIONS.REPORTS_EXPORT,
-      
-      // Alerts
       PERMISSIONS.ALERTS_VIEW,
       PERMISSIONS.ALERTS_CREATE,
       PERMISSIONS.ALERTS_ACKNOWLEDGE,
       PERMISSIONS.ALERTS_RESOLVE,
-      
-      // Notifications
       PERMISSIONS.NOTIFICATIONS_VIEW,
       PERMISSIONS.NOTIFICATIONS_SEND,
-      
-      // Exchange
       PERMISSIONS.EXCHANGE_VIEW,
       PERMISSIONS.EXCHANGE_CREATE,
       PERMISSIONS.EXCHANGE_UPDATE,
-      
-      // Heat Recovery
       PERMISSIONS.HEAT_RECOVERY_VIEW,
       PERMISSIONS.HEAT_RECOVERY_CREATE,
       PERMISSIONS.HEAT_RECOVERY_UPDATE
@@ -351,53 +210,30 @@ const ROLES = {
     name: 'Engineer',
     description: 'Technical user with access to machine and sensor data',
     permissions: [
-      // Factories
       PERMISSIONS.FACTORIES_VIEW,
-      
-      // Departments
       PERMISSIONS.DEPARTMENTS_VIEW,
-      
-      // Production Lines
       PERMISSIONS.PRODUCTION_LINES_VIEW,
-      
-      // Machines
       PERMISSIONS.MACHINES_VIEW,
       PERMISSIONS.MACHINES_UPDATE,
-      
-      // Sensors
       PERMISSIONS.SENSORS_VIEW,
       PERMISSIONS.SENSORS_UPDATE,
       PERMISSIONS.SENSORS_READINGS_VIEW,
       PERMISSIONS.SENSORS_READINGS_EXPORT,
-      
-      // Sustainability
       PERMISSIONS.CARBON_VIEW,
       PERMISSIONS.ENERGY_VIEW,
       PERMISSIONS.WATER_VIEW,
       PERMISSIONS.WASTE_VIEW,
-      
-      // Reports
       PERMISSIONS.REPORTS_VIEW,
       PERMISSIONS.REPORTS_CREATE,
       PERMISSIONS.REPORTS_EXPORT,
-      
-      // Alerts
       PERMISSIONS.ALERTS_VIEW,
       PERMISSIONS.ALERTS_CREATE,
       PERMISSIONS.ALERTS_ACKNOWLEDGE,
       PERMISSIONS.ALERTS_RESOLVE,
-      
-      // Notifications
       PERMISSIONS.NOTIFICATIONS_VIEW,
-      
-      // Exchange
       PERMISSIONS.EXCHANGE_VIEW,
       PERMISSIONS.EXCHANGE_CREATE,
-      
-      // Heat Recovery
       PERMISSIONS.HEAT_RECOVERY_VIEW,
-      
-      // Digital Twin
       PERMISSIONS.DIGITAL_TWIN_VIEW
     ],
     isAdmin: false
@@ -408,42 +244,21 @@ const ROLES = {
     name: 'Employee',
     description: 'Regular employee with read-only access to most data',
     permissions: [
-      // Factories
       PERMISSIONS.FACTORIES_VIEW,
-      
-      // Departments
       PERMISSIONS.DEPARTMENTS_VIEW,
-      
-      // Production Lines
       PERMISSIONS.PRODUCTION_LINES_VIEW,
-      
-      // Machines
       PERMISSIONS.MACHINES_VIEW,
-      
-      // Sensors
       PERMISSIONS.SENSORS_VIEW,
       PERMISSIONS.SENSORS_READINGS_VIEW,
-      
-      // Sustainability
       PERMISSIONS.CARBON_VIEW,
       PERMISSIONS.ENERGY_VIEW,
       PERMISSIONS.WATER_VIEW,
       PERMISSIONS.WASTE_VIEW,
-      
-      // Reports
       PERMISSIONS.REPORTS_VIEW,
       PERMISSIONS.REPORTS_EXPORT,
-      
-      // Alerts
       PERMISSIONS.ALERTS_VIEW,
-      
-      // Notifications
       PERMISSIONS.NOTIFICATIONS_VIEW,
-      
-      // Exchange
       PERMISSIONS.EXCHANGE_VIEW,
-      
-      // Heat Recovery
       PERMISSIONS.HEAT_RECOVERY_VIEW
     ],
     isAdmin: false
@@ -454,35 +269,18 @@ const ROLES = {
     name: 'Viewer',
     description: 'Read-only access to basic data',
     permissions: [
-      // Factories
       PERMISSIONS.FACTORIES_VIEW,
-      
-      // Departments
       PERMISSIONS.DEPARTMENTS_VIEW,
-      
-      // Production Lines
       PERMISSIONS.PRODUCTION_LINES_VIEW,
-      
-      // Machines
       PERMISSIONS.MACHINES_VIEW,
-      
-      // Sensors
       PERMISSIONS.SENSORS_VIEW,
       PERMISSIONS.SENSORS_READINGS_VIEW,
-      
-      // Sustainability
       PERMISSIONS.CARBON_VIEW,
       PERMISSIONS.ENERGY_VIEW,
       PERMISSIONS.WATER_VIEW,
       PERMISSIONS.WASTE_VIEW,
-      
-      // Reports
       PERMISSIONS.REPORTS_VIEW,
-      
-      // Alerts
       PERMISSIONS.ALERTS_VIEW,
-      
-      // Notifications
       PERMISSIONS.NOTIFICATIONS_VIEW
     ],
     isAdmin: false
@@ -512,23 +310,26 @@ const checkPermissions = (requiredPermissions = []) => {
       }
 
       // الحصول على صلاحيات المستخدم
-      const userRole = req.user.claims?.role || req.user.role || 'viewer';
-      const userPermissions = req.user.claims?.permissions || req.user.permissions || [];
-      
-      // الحصول على صلاحيات الدور
-      const rolePermissions = ROLES[userRole]?.permissions || [];
+      const userRole = req.user.role || 'viewer';
+      const userPermissions = req.user.permissions || [];
+
+      // ✅ **الأهم: أي admin أو super_admin يعدي علطول**
+      if (userRole === 'admin' || userRole === 'super_admin') {
+        logger.debug('✅ Admin bypassed permissions check', {
+          userId: req.user.id,
+          role: userRole,
+          requiredPermissions
+        });
+        return next();
+      }
 
       // إذا كانت الصلاحيات المطلوبة فارغة، نسمح بالمرور
       if (!requiredPermissions || requiredPermissions.length === 0) {
         return next();
       }
 
-      // التحقق من صلاحيات الـ Super Admin
-      if (userRole === 'super_admin') {
-        return next();
-      }
-
       // جمع كل صلاحيات المستخدم
+      const rolePermissions = ROLES[userRole]?.permissions || [];
       const allPermissions = [...userPermissions, ...rolePermissions];
 
       // التحقق من جميع الصلاحيات المطلوبة
@@ -582,10 +383,10 @@ const checkRole = (allowedRoles = []) => {
         return sendUnauthorized(res, 'Authentication required');
       }
 
-      const userRole = req.user.claims?.role || req.user.role || 'viewer';
+      const userRole = req.user.role || 'viewer';
 
-      // Super Admin يمكنه الوصول لكل شيء
-      if (userRole === 'super_admin') {
+      // ✅ Super Admin و Admin يعدوا علطول
+      if (userRole === 'super_admin' || userRole === 'admin') {
         return next();
       }
 
@@ -616,11 +417,11 @@ const checkRole = (allowedRoles = []) => {
 const hasPermission = (user, permission) => {
   if (!user) return false;
   
-  const userRole = user.claims?.role || user.role || 'viewer';
-  const userPermissions = user.claims?.permissions || user.permissions || [];
+  const userRole = user.role || 'viewer';
+  const userPermissions = user.permissions || [];
   
-  // Super Admin لديه كل الصلاحيات
-  if (userRole === 'super_admin') return true;
+  // Admin أو Super Admin لديهم كل الصلاحيات
+  if (userRole === 'admin' || userRole === 'super_admin') return true;
   
   const rolePermissions = ROLES[userRole]?.permissions || [];
   const allPermissions = [...userPermissions, ...rolePermissions];

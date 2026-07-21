@@ -140,7 +140,7 @@ class CompanyController extends BaseController {
   // ============ FIND ============
 
   /**
-   * الحصول على قائمة الشركات
+   * الحصول على قائمة الشركات مع إحصائيات محسوبة
    * GET /api/v1/companies
    */
   async getList(req, res) {
@@ -166,13 +166,13 @@ class CompanyController extends BaseController {
   }
 
   /**
-   * الحصول على شركة بالمعرف
+   * الحصول على شركة بالمعرف مع إحصائيات محسوبة
    * GET /api/v1/companies/:id
    */
   async getById(req, res) {
     try {
       const { id } = req.params;
-      const result = await this.service.getCompanyById(id);
+      const result = await this.service.getCompanyWithStats(id);
       return sendResponse(res, 200, 'Company retrieved successfully', result);
     } catch (error) {
       logger.error('Get company by id error:', error);
@@ -645,4 +645,4 @@ class CompanyController extends BaseController {
   }
 }
 
-module.exports = CompanyController; 
+module.exports = CompanyController;

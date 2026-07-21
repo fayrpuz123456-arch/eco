@@ -384,143 +384,116 @@ companySchema.virtual('esgScoreLevel').get(function() {
   return 'Critical';
 });
 
-// ============ PRE-SAVE MIDDLEWARE (تم التعديل النهائي) ============
+// ============ PRE-SAVE MIDDLEWARE ============
+// ✅ تم شيل نمط callback(next) القديم. Mongoose الحديثة بتتعامل مع hook
+// من غير باراميتر next كـ sync، وأي throw جواها بيتحول تلقائيًا لخطأ save
+// صحيح (بدل ما next() يبقى undefined ويطلع "next is not a function").
 
-companySchema.pre('save', function(next) {
-  try {
-    // تحديث updatedAt تلقائياً
-    this.updatedAt = new Date();
-    
-    // تنظيف البيانات
-    if (this.name) this.name = this.name.trim();
-    if (this.code) this.code = this.code.toUpperCase().trim();
-    if (this.contactEmail) this.contactEmail = this.contactEmail.toLowerCase().trim();
-    if (this.description) this.description = this.description.trim();
-    if (this.website) this.website = this.website.trim();
-    
-    // تنظيف بيانات العنوان
-    if (this.address) {
-      if (this.address.street) this.address.street = this.address.street.trim();
-      if (this.address.city) this.address.city = this.address.city.trim();
-      if (this.address.state) this.address.state = this.address.state.trim();
-      if (this.address.country) this.address.country = this.address.country.trim();
-      if (this.address.postalCode) this.address.postalCode = this.address.postalCode.trim();
-      if (this.address.formattedAddress) this.address.formattedAddress = this.address.formattedAddress.trim();
+companySchema.pre('save', function() {
+  // تحديث updatedAt تلقائياً
+  this.updatedAt = new Date();
+
+  // تنظيف البيانات
+  if (this.name) this.name = this.name.trim();
+  if (this.code) this.code = this.code.toUpperCase().trim();
+  if (this.contactEmail) this.contactEmail = this.contactEmail.toLowerCase().trim();
+  if (this.description) this.description = this.description.trim();
+  if (this.website) this.website = this.website.trim();
+
+  // تنظيف بيانات العنوان
+  if (this.address) {
+    if (this.address.street) this.address.street = this.address.street.trim();
+    if (this.address.city) this.address.city = this.address.city.trim();
+    if (this.address.state) this.address.state = this.address.state.trim();
+    if (this.address.country) this.address.country = this.address.country.trim();
+    if (this.address.postalCode) this.address.postalCode = this.address.postalCode.trim();
+    if (this.address.formattedAddress) this.address.formattedAddress = this.address.formattedAddress.trim();
+  }
+
+  // تنظيف بيانات جهة الاتصال
+  if (this.contactPerson) {
+    if (this.contactPerson.name) this.contactPerson.name = this.contactPerson.name.trim();
+    if (this.contactPerson.email) this.contactPerson.email = this.contactPerson.email.toLowerCase().trim();
+    if (this.contactPerson.phone) this.contactPerson.phone = this.contactPerson.phone.trim();
+    if (this.contactPerson.position) this.contactPerson.position = this.contactPerson.position.trim();
+  }
+
+  // التحقق من البيانات المطلوبة
+  if (!this.name) {
+    throw new Error('Name is required');
+  }
+
+  if (!this.code) {
+    throw new Error('Code is required');
+  }
+
+  if (!this.industry) {
+    throw new Error('Industry is required');
+  }
+
+  if (!this.contactEmail) {
+    throw new Error('Contact email is required');
+  }
+
+  // التحقق من صحة البريد الإلكتروني
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(this.contactEmail)) {
+    throw new Error('Invalid email format');
+  }
+
+  // التحقق من صحة البريد الإلكتروني لجهة الاتصال
+  if (this.contactPerson && this.contactPerson.email) {
+    if (!emailRegex.test(this.contactPerson.email)) {
+      throw new Error('Invalid contact person email format');
     }
-    
-    // تنظيف بيانات جهة الاتصال
-    if (this.contactPerson) {
-      if (this.contactPerson.name) this.contactPerson.name = this.contactPerson.name.trim();
-      if (this.contactPerson.email) this.contactPerson.email = this.contactPerson.email.toLowerCase().trim();
-      if (this.contactPerson.phone) this.contactPerson.phone = this.contactPerson.phone.trim();
-      if (this.contactPerson.position) this.contactPerson.position = this.contactPerson.position.trim();
-    }
-    
-    // التحقق من البيانات المطلوبة
-    if (!this.name) {
-      return next(new Error('Name is required'));
-    }
-    
-    if (!this.code) {
-      return next(new Error('Code is required'));
-    }
-    
-    if (!this.industry) {
-      return next(new Error('Industry is required'));
-    }
-    
-    if (!this.contactEmail) {
-      return next(new Error('Contact email is required'));
-    }
-    
-    // التحقق من صحة البريد الإلكتروني
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(this.contactEmail)) {
-      return next(new Error('Invalid email format'));
-    }
-    
-    // التحقق من صحة البريد الإلكتروني لجهة الاتصال
-    if (this.contactPerson && this.contactPerson.email) {
-      if (!emailRegex.test(this.contactPerson.email)) {
-        return next(new Error('Invalid contact person email format'));
-      }
-    }
-    
-    // تحديث تصنيف ESG إذا تغيرت درجة الاستدامة
-    if (this.isModified('esg.sustainabilityScore')) {
-      this.updateESGRating();
-    }
-    
-    // ✅ استدعاء next() في النهاية
-    return next();
-  } catch (error) {
-    // ✅ في حالة الخطأ، مرر الخطأ لـ next
-    return next(error);
+  }
+
+  // تحديث تصنيف ESG إذا تغيرت درجة الاستدامة
+  if (this.isModified('esg.sustainabilityScore')) {
+    this.updateESGRating();
   }
 });
 
 // ============ PRE-VALIDATE MIDDLEWARE ============
 
-companySchema.pre('validate', function(next) {
-  try {
-    // التحقق من صحة البيانات قبل الحفظ
-    if (this.name) {
-      this.name = this.name.trim();
-    }
-    
-    if (this.code) {
-      this.code = this.code.toUpperCase().trim();
-    }
-    
-    if (this.contactEmail) {
-      this.contactEmail = this.contactEmail.toLowerCase().trim();
-    }
-    
-    if (this.description) {
-      this.description = this.description.trim();
-    }
-    
-    if (this.website) {
-      this.website = this.website.trim();
-    }
-    
-    return next();
-  } catch (error) {
-    return next(error);
+companySchema.pre('validate', function() {
+  if (this.name) {
+    this.name = this.name.trim();
+  }
+
+  if (this.code) {
+    this.code = this.code.toUpperCase().trim();
+  }
+
+  if (this.contactEmail) {
+    this.contactEmail = this.contactEmail.toLowerCase().trim();
+  }
+
+  if (this.description) {
+    this.description = this.description.trim();
+  }
+
+  if (this.website) {
+    this.website = this.website.trim();
   }
 });
 
 // ============ PRE-FINDONEANDUPDATE MIDDLEWARE ============
 
-companySchema.pre('findOneAndUpdate', function(next) {
-  try {
-    this.set({ updatedAt: new Date() });
-    return next();
-  } catch (error) {
-    return next(error);
-  }
+companySchema.pre('findOneAndUpdate', function() {
+  this.set({ updatedAt: new Date() });
 });
 
 // ============ PRE-UPDATEONE MIDDLEWARE ============
 
-companySchema.pre('updateOne', function(next) {
-  try {
-    this.set({ updatedAt: new Date() });
-    return next();
-  } catch (error) {
-    return next(error);
-  }
+companySchema.pre('updateOne', function() {
+  this.set({ updatedAt: new Date() });
 });
 
 // ============ PRE-UPDATEMANY MIDDLEWARE ============
 
-companySchema.pre('updateMany', function(next) {
-  try {
-    this.set({ updatedAt: new Date() });
-    return next();
-  } catch (error) {
-    return next(error);
-  }
+companySchema.pre('updateMany', function() {
+  this.set({ updatedAt: new Date() });
 });
 
 // ============ POST-SAVE MIDDLEWARE ============
@@ -529,6 +502,8 @@ companySchema.post('save', function(doc) {
   console.log('✅ Company saved successfully:', doc._id);
 });
 
+// ✅ error-handling middleware: التوقيع ده (error, doc, next) لازم يفضل زي ما هو
+// لأنه نوع مختلف تمامًا عن الـ pre hooks العادية، وهو بيستقبل next حقيقي من Mongoose.
 companySchema.post('save', function(error, doc, next) {
   if (error) {
     console.error('❌ Error saving company:', error.message);
