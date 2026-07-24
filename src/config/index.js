@@ -96,10 +96,12 @@ module.exports = {
     autoLoad: process.env.AUTO_LOAD_PLUGINS === 'true'
   },
 
+  // ==================== FEATURES ====================
+  // ✅ تم تفعيل الـ AI Service مباشرة
   features: {
     enableMqtt: process.env.ENABLE_MQTT === 'true' || false,
     enableSocket: process.env.ENABLE_SOCKET === 'true' || false,
     enableRedis: process.env.ENABLE_REDIS === 'true' || false,
-    enableAI: process.env.ENABLE_AI === 'true' || false
+    enableAI: true  // ✅ مفعل مباشرة
   }
 };
