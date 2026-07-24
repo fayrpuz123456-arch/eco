@@ -50,8 +50,10 @@ module.exports = {
     corsOrigin: process.env.SOCKET_CORS_ORIGIN || 'http://localhost:3000'
   },
 
+  // ==================== AI SERVICE ====================
+  // ✅ تم تحديث الرابط إلى الـ AI Service الجديد
   ai: {
-    serviceUrl: process.env.AI_SERVICE_URL || 'http://ai-service:5000',
+    serviceUrl: process.env.AI_SERVICE_URL || 'https://ai-eco-service-production.up.railway.app',
     predictionEndpoint: process.env.AI_PREDICTION_ENDPOINT || '/api/v1/predict'
   },
 
@@ -101,4 +103,3 @@ module.exports = {
     enableAI: process.env.ENABLE_AI === 'true' || false
   }
 };
-//new deploy
