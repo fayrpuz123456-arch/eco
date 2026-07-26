@@ -863,8 +863,3 @@ productionLineSchema.statics.getCategoryDistribution = async function(department
 const ProductionLine = mongoose.model('ProductionLine', productionLineSchema);
 
 module.exports = ProductionLine;
-<<<<<<< HEAD
-=======
-
-//new
->>>>>>> 17ece9050c5481a3eddb7ef73eeac060e705306d
