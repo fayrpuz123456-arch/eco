@@ -1,6 +1,16 @@
 const mongoose = require('mongoose');
+const BaseModel = require('../../../core/base/BaseModel');
 
-const machineSchema = new mongoose.Schema({
+// ============ MACHINE SCHEMA ============
+// ✅ تم التحويل لاستخدام BaseModel.createSchema بدل new mongoose.Schema المباشر
+// لنفس السبب المذكور في ProductionLine و Department: بدون companyId معرّف في
+// الـ schema، Mongoose كان بيشيل الحقل بصمت وقت الحفظ (strict mode)، فالـ
+// Dashboard metrics (اللي بتفلتر بـ companyId) كانت بترجع 0 دايماً.
+
+const machineSchema = BaseModel.createSchema({
+  // ===== Base Fields (مضافة من BaseModel) =====
+  // companyId, createdBy, updatedBy, createdAt, updatedAt, deletedAt, status, metadata
+
   name: {
     type: String,
     required: true,
@@ -69,11 +79,6 @@ const machineSchema = new mongoose.Schema({
     type: Date,
     default: null
   },
-  status: {
-    type: String,
-    enum: ['active', 'inactive', 'operational', 'maintenance', 'idle', 'offline', 'error', 'archived'],
-    default: 'active'
-  },
   operationalStatus: {
     type: String,
     enum: ['running', 'stopped', 'idle', 'maintenance', 'error', 'offline'],
@@ -138,30 +143,10 @@ const machineSchema = new mongoose.Schema({
     default: [],
     index: true
   },
-  metadata: {
-    type: mongoose.Schema.Types.Mixed,
-    default: {}
-  },
-  createdAt: {
-    type: Date,
-    default: Date.now
-  },
-  updatedAt: {
-    type: Date,
-    default: Date.now
-  },
-  deletedAt: {
-    type: Date,
-    default: null
-  },
-  deletedBy: {
-    type: String,
-    default: null
-  },
-  deletedReason: {
-    type: String,
-    default: null
-  }
+
+  // ===== Soft Delete =====
+  deletedBy: { type: String, default: null },
+  deletedReason: { type: String, default: null }
 }, {
   timestamps: {
     createdAt: 'createdAt',
@@ -176,24 +161,22 @@ const machineSchema = new mongoose.Schema({
 });
 
 // ============ INDEXES ============
+// ✅ status و deletedAt معرّفين بالفعل في BaseModel، فاتشالوا من هنا
 
-machineSchema.index({ code: 1, factoryId: 1 }, { unique: true });
+machineSchema.index({ code: 1, factoryId: 1, companyId: 1 }, { unique: true });
 machineSchema.index({ factoryId: 1, departmentId: 1 });
 machineSchema.index({ factoryId: 1, status: 1 });
 machineSchema.index({ departmentId: 1, status: 1 });
 machineSchema.index({ productionLineId: 1 });
 machineSchema.index({ type: 1 });
-machineSchema.index({ status: 1 });
 machineSchema.index({ operationalStatus: 1 });
 machineSchema.index({ 'performance.oee': 1 });
-machineSchema.index({ tags: 1 });
 machineSchema.index({ createdAt: -1 });
-machineSchema.index({ deletedAt: 1 }, { sparse: true });
 
 // ============ VIRTUALS ============
 
 machineSchema.virtual('isActive').get(function() {
-  return this.status === 'active' || this.status === 'operational' && !this.deletedAt;
+  return (this.status === 'active' || this.status === 'operational') && !this.deletedAt;
 });
 
 machineSchema.virtual('isOperational').get(function() {
@@ -212,155 +195,63 @@ machineSchema.virtual('overallOEE').get(function() {
   return this.performance.oee || 0;
 });
 
-// ============ PRE-SAVE MIDDLEWARE ============
-// ✅ تم التعليق لأن BaseModel يوفر Pre-save middleware
-// تجنباً لتكرار Pre-save hooks
+// ============ PRE-VALIDATE MIDDLEWARE (async style — no `next` param) ============
 
-/*
-machineSchema.pre('save', function(next) {
-  try {
-    this.updatedAt = new Date();
-    
-    if (this.name) this.name = this.name.trim();
-    if (this.code) this.code = this.code.toUpperCase().trim();
-    if (this.model) this.model = this.model.trim();
-    if (this.serialNumber) this.serialNumber = this.serialNumber.trim();
-    if (this.manufacturer) this.manufacturer = this.manufacturer.trim();
-    if (this.description) this.description = this.description.trim();
-    
-    if (!this.name) {
-      return next(new Error('Name is required'));
+machineSchema.pre('validate', async function() {
+  if (this.name) this.name = this.name.trim();
+  if (this.code) this.code = this.code.toUpperCase().trim();
+  if (this.model) this.model = this.model.trim();
+  if (this.serialNumber) this.serialNumber = this.serialNumber.trim();
+  if (this.manufacturer) this.manufacturer = this.manufacturer.trim();
+  if (this.description) this.description = this.description.trim();
+
+  if (this.installationDate && this.warrantyExpiry) {
+    if (new Date(this.installationDate) > new Date(this.warrantyExpiry)) {
+      throw new Error('Installation date must be before warranty expiry date');
     }
-    
-    if (!this.code) {
-      return next(new Error('Code is required'));
+  }
+
+  const codeRegex = /^[A-Z0-9]+$/;
+  if (this.code && !codeRegex.test(this.code)) {
+    throw new Error('Code must contain only uppercase letters and numbers');
+  }
+
+  if (this.yearOfManufacture) {
+    const currentYear = new Date().getFullYear();
+    if (this.yearOfManufacture < 1900 || this.yearOfManufacture > currentYear + 1) {
+      throw new Error(`Year of manufacture must be between 1900 and ${currentYear + 1}`);
     }
-    
-    if (!this.type) {
-      return next(new Error('Type is required'));
-    }
-    
-    if (!this.factoryId) {
-      return next(new Error('Factory ID is required'));
-    }
-    
-    if (!this.departmentId) {
-      return next(new Error('Department ID is required'));
-    }
-    
-    const codeRegex = /^[A-Z0-9]+$/;
-    if (this.code && !codeRegex.test(this.code)) {
-      return next(new Error('Code must contain only uppercase letters and numbers'));
-    }
-    
-    if (this.yearOfManufacture) {
-      const currentYear = new Date().getFullYear();
-      if (this.yearOfManufacture < 1900 || this.yearOfManufacture > currentYear + 1) {
-        return next(new Error(`Year of manufacture must be between 1900 and ${currentYear + 1}`));
-      }
-    }
-    
-    this.performance.lastUpdated = new Date();
-    this.energy.lastUpdated = new Date();
-    this.sensors.lastUpdated = new Date();
-    
-    return next();
-  } catch (error) {
-    return next(error);
   }
 });
-*/
 
-// ============ PRE-VALIDATE MIDDLEWARE ============
-// ✅ تم التعليق لأن BaseModel يوفر Pre-validate
+// ============ PRE-SAVE MIDDLEWARE (async style — no `next` param) ============
 
-/*
-machineSchema.pre('validate', function(next) {
-  try {
-    if (this.name) {
-      this.name = this.name.trim();
-    }
-    
-    if (this.code) {
-      this.code = this.code.toUpperCase().trim();
-    }
-    
-    if (this.model) {
-      this.model = this.model.trim();
-    }
-    
-    if (this.serialNumber) {
-      this.serialNumber = this.serialNumber.trim();
-    }
-    
-    if (this.manufacturer) {
-      this.manufacturer = this.manufacturer.trim();
-    }
-    
-    if (this.description) {
-      this.description = this.description.trim();
-    }
-    
-    if (this.installationDate && this.warrantyExpiry) {
-      if (new Date(this.installationDate) > new Date(this.warrantyExpiry)) {
-        return next(new Error('Installation date must be before warranty expiry date'));
-      }
-    }
-    
-    return next();
-  } catch (error) {
-    return next(error);
-  }
+machineSchema.pre('save', async function() {
+  this.updatedAt = new Date();
+
+  if (!this.name) throw new Error('Name is required');
+  if (!this.code) throw new Error('Code is required');
+  if (!this.type) throw new Error('Type is required');
+  if (!this.factoryId) throw new Error('Factory ID is required');
+  if (!this.departmentId) throw new Error('Department ID is required');
+
+  this.performance.lastUpdated = new Date();
+  this.energy.lastUpdated = new Date();
+  this.sensors.lastUpdated = new Date();
 });
-*/
 
-// ============ PRE-FINDONEANDUPDATE MIDDLEWARE ============
-// ✅ تم التعليق لأن BaseModel يوفر Pre-findOneAndUpdate
+// ============ PRE-UPDATE HOOKS (findOneAndUpdate / updateOne / updateMany) ============
 
-/*
-machineSchema.pre('findOneAndUpdate', function(next) {
-  try {
-    this.set({ updatedAt: new Date() });
-    this.set({ 'performance.lastUpdated': new Date() });
-    this.set({ 'energy.lastUpdated': new Date() });
-    this.set({ 'sensors.lastUpdated': new Date() });
-    return next();
-  } catch (error) {
-    return next(error);
-  }
+machineSchema.pre(['findOneAndUpdate', 'updateOne'], async function() {
+  this.set({ updatedAt: new Date() });
+  this.set({ 'performance.lastUpdated': new Date() });
+  this.set({ 'energy.lastUpdated': new Date() });
+  this.set({ 'sensors.lastUpdated': new Date() });
 });
-*/
 
-// ============ PRE-UPDATEONE MIDDLEWARE ============
-// ✅ تم التعليق لأن BaseModel يوفر Pre-updateOne
-
-/*
-machineSchema.pre('updateOne', function(next) {
-  try {
-    this.set({ updatedAt: new Date() });
-    this.set({ 'performance.lastUpdated': new Date() });
-    this.set({ 'energy.lastUpdated': new Date() });
-    this.set({ 'sensors.lastUpdated': new Date() });
-    return next();
-  } catch (error) {
-    return next(error);
-  }
+machineSchema.pre('updateMany', async function() {
+  this.set({ updatedAt: new Date() });
 });
-*/
-
-// ============ PRE-UPDATEMANY MIDDLEWARE ============
-// ✅ تم التعليق لأن BaseModel يوفر Pre-updateMany
-
-/*
-machineSchema.pre('updateMany', function(next) {
-  try {
-    this.set({ updatedAt: new Date() });
-    return next();
-  } catch (error) {
-    return next(error);
-  }
-});
-*/
 
 // ============ POST-SAVE MIDDLEWARE ============
 
@@ -368,11 +259,15 @@ machineSchema.post('save', function(doc) {
   console.log('✅ Machine saved successfully:', doc._id);
 });
 
+// ⚠️ لازم 3 باراميترات (error, doc, next) عشان mongoose/kareem يتعرف على الدالة
+// كـ error handler صح، مش hook عادي (راجع نفس الملاحظة في ProductionLine/Department)
+
 machineSchema.post('save', function(error, doc, next) {
   if (error) {
     console.error('❌ Error saving machine:', error.message);
+    return next(error);
   }
-  next(error);
+  next();
 });
 
 // ============ POST-FINDONEANDUPDATE MIDDLEWARE ============
@@ -381,6 +276,14 @@ machineSchema.post('findOneAndUpdate', function(doc) {
   if (doc) {
     console.log('✅ Machine updated successfully:', doc._id);
   }
+});
+
+machineSchema.post('findOneAndUpdate', function(error, doc, next) {
+  if (error) {
+    console.error('❌ Error updating machine:', error.message);
+    return next(error);
+  }
+  next();
 });
 
 // ============ METHODS ============
@@ -500,6 +403,7 @@ machineSchema.methods.toPublicJSON = function() {
 machineSchema.methods.toAdminJSON = function() {
   return {
     ...this.toPublicJSON(),
+    companyId: this.companyId,
     factoryId: this.factoryId,
     departmentId: this.departmentId,
     productionLineId: this.productionLineId,
@@ -522,70 +426,76 @@ machineSchema.methods.toAdminJSON = function() {
 /**
  * البحث عن ماكينة بالكود
  */
-machineSchema.statics.findByCode = function(code, factoryId) {
+machineSchema.statics.findByCode = function(code, factoryId, companyId) {
   const query = { code: code.toUpperCase(), deletedAt: null };
   if (factoryId) query.factoryId = factoryId;
+  if (companyId) query.companyId = companyId;
   return this.findOne(query);
 };
 
 /**
  * البحث عن ماكينات حسب النوع
  */
-machineSchema.statics.findByType = function(type, factoryId) {
+machineSchema.statics.findByType = function(type, factoryId, companyId) {
   const query = { type, deletedAt: null };
   if (factoryId) query.factoryId = factoryId;
+  if (companyId) query.companyId = companyId;
   return this.find(query);
 };
 
 /**
  * البحث عن ماكينات حسب الحالة
  */
-machineSchema.statics.findByStatus = function(status, factoryId) {
+machineSchema.statics.findByStatus = function(status, factoryId, companyId) {
   const query = { status, deletedAt: null };
   if (factoryId) query.factoryId = factoryId;
+  if (companyId) query.companyId = companyId;
   return this.find(query);
 };
 
 /**
  * البحث عن ماكينات نشطة
  */
-machineSchema.statics.findActive = function(factoryId) {
+machineSchema.statics.findActive = function(factoryId, companyId) {
   const query = {
     status: { $in: ['active', 'operational'] },
     deletedAt: null
   };
   if (factoryId) query.factoryId = factoryId;
+  if (companyId) query.companyId = companyId;
   return this.find(query);
 };
 
 /**
  * البحث عن ماكينات تحت الصيانة
  */
-machineSchema.statics.findUnderMaintenance = function(factoryId) {
+machineSchema.statics.findUnderMaintenance = function(factoryId, companyId) {
   const query = {
     status: 'maintenance',
     deletedAt: null
   };
   if (factoryId) query.factoryId = factoryId;
+  if (companyId) query.companyId = companyId;
   return this.find(query);
 };
 
 /**
  * البحث عن ماكينات ذات OEE عالي
  */
-machineSchema.statics.findHighPerformance = function(minOEE = 80, factoryId) {
+machineSchema.statics.findHighPerformance = function(minOEE = 80, factoryId, companyId) {
   const query = {
     'performance.oee': { $gte: minOEE },
     deletedAt: null
   };
   if (factoryId) query.factoryId = factoryId;
+  if (companyId) query.companyId = companyId;
   return this.find(query).sort({ 'performance.oee': -1 });
 };
 
 /**
  * البحث النصي
  */
-machineSchema.statics.search = function(searchTerm, factoryId) {
+machineSchema.statics.search = function(searchTerm, factoryId, companyId) {
   const searchRegex = new RegExp(searchTerm, 'i');
   const query = {
     deletedAt: null,
@@ -600,16 +510,18 @@ machineSchema.statics.search = function(searchTerm, factoryId) {
     ]
   };
   if (factoryId) query.factoryId = factoryId;
+  if (companyId) query.companyId = companyId;
   return this.find(query);
 };
 
 /**
  * الحصول على إحصائيات الماكينات
  */
-machineSchema.statics.getStats = async function(factoryId) {
+machineSchema.statics.getStats = async function(factoryId, companyId) {
   const match = { deletedAt: null };
   if (factoryId) match.factoryId = factoryId;
-  
+  if (companyId) match.companyId = companyId;
+
   const stats = await this.aggregate([
     { $match: match },
     {
@@ -653,7 +565,7 @@ machineSchema.statics.getStats = async function(factoryId) {
       }
     }
   ]);
-  
+
   return stats[0] || {
     total: 0,
     active: 0,
@@ -672,10 +584,11 @@ machineSchema.statics.getStats = async function(factoryId) {
 /**
  * توزيع الماكينات حسب النوع
  */
-machineSchema.statics.getTypeDistribution = async function(factoryId) {
+machineSchema.statics.getTypeDistribution = async function(factoryId, companyId) {
   const match = { deletedAt: null };
   if (factoryId) match.factoryId = factoryId;
-  
+  if (companyId) match.companyId = companyId;
+
   return this.aggregate([
     { $match: match },
     {
@@ -693,17 +606,18 @@ machineSchema.statics.getTypeDistribution = async function(factoryId) {
 /**
  * الحصول على الماكينات التي تحتاج صيانة
  */
-machineSchema.statics.findDueForMaintenance = async function(daysThreshold = 7, factoryId) {
+machineSchema.statics.findDueForMaintenance = async function(daysThreshold = 7, factoryId, companyId) {
   const thresholdDate = new Date();
   thresholdDate.setDate(thresholdDate.getDate() + daysThreshold);
-  
+
   const query = {
     'maintenance.nextMaintenance': { $lte: thresholdDate },
     deletedAt: null,
     status: { $in: ['active', 'operational'] }
   };
   if (factoryId) query.factoryId = factoryId;
-  
+  if (companyId) query.companyId = companyId;
+
   return this.find(query).sort({ 'maintenance.nextMaintenance': 1 });
 };
 

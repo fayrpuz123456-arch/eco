@@ -1,8 +1,18 @@
 const mongoose = require('mongoose');
+const BaseModel = require('../../../core/base/BaseModel');
 
 // ============ DEPARTMENT SCHEMA ============
+// ✅ تم التحويل لاستخدام BaseModel.createSchema بدل new mongoose.Schema المباشر.
+// السبب: الحقول القديمة (status, deletedAt, createdAt, updatedAt) كانت معرّفة يدوياً
+// هنا لكن بدون companyId/createdBy/updatedBy/metadata، فكانت هذه الحقول تُحذف بصمت
+// عند الحفظ (Mongoose بيشيل أي حقل مش معرّف في الـ schema لما strict: true، الافتراضي).
+// النتيجة: أي Query بيفلتر بـ companyId (زي حساب الـ Dashboard metrics) كان بيرجع 0
+// دايماً رغم إن الحفظ نفسه كان بينجح.
 
-const departmentSchema = new mongoose.Schema({
+const departmentSchema = BaseModel.createSchema({
+  // ===== Base Fields (مضافة من BaseModel) =====
+  // companyId, createdBy, updatedBy, createdAt, updatedAt, deletedAt, status, metadata
+
   // ===== Basic Information =====
   name: {
     type: String,
@@ -39,36 +49,31 @@ const departmentSchema = new mongoose.Schema({
     type: String,
     default: null
   },
-  status: {
-    type: String,
-    enum: ['active', 'inactive', 'archived'],
-    default: 'active'
-  },
-  createdAt: {
-    type: Date,
-    default: Date.now
-  },
-  updatedAt: {
-    type: Date,
-    default: Date.now
-  },
-  deletedAt: {
-    type: Date,
-    default: null
-  }
+
+  // ===== Soft Delete =====
+  deletedBy: { type: String, default: null },
+  deletedReason: { type: String, default: null }
 }, {
   timestamps: {
     createdAt: 'createdAt',
     updatedAt: 'updatedAt'
+  },
+  toJSON: {
+    transform: (doc, ret) => {
+      delete ret.__v;
+      return ret;
+    }
   }
 });
 
 // ============ INDEXES ============
-departmentSchema.index({ code: 1, factoryId: 1 }, { unique: true });
-departmentSchema.index({ factoryId: 1, status: 1 });
+// ✅ status و deletedAt معرّفين بالفعل في BaseModel، فاتشالوا من هنا لتفادي
+// "Duplicate schema index" warning
+
+departmentSchema.index({ code: 1, factoryId: 1, companyId: 1 }, { unique: true });
+departmentSchema.index({ factoryId: 1 });
 departmentSchema.index({ type: 1 });
 departmentSchema.index({ name: 1 });
-departmentSchema.index({ deletedAt: 1 }, { sparse: true });
 departmentSchema.index({ factoryId: 1, type: 1 });
 
 // ============ VIRTUALS ============
@@ -81,117 +86,35 @@ departmentSchema.virtual('displayName').get(function() {
   return `${this.name} (${this.code})`;
 });
 
-// ============ PRE-SAVE MIDDLEWARE ============
-// ✅ تم التعليق لأن BaseModel يوفر Pre-save middleware
-// تجنباً لتكرار Pre-save hooks
+// ============ PRE-VALIDATE MIDDLEWARE (async style — no `next` param) ============
 
-/*
-departmentSchema.pre('save', function(next) {
-  try {
-    this.updatedAt = new Date();
-    
-    if (this.name) this.name = this.name.trim();
-    if (this.code) this.code = this.code.toUpperCase().trim();
-    if (this.description) this.description = this.description.trim();
-    
-    if (!this.name) {
-      return next(new Error('Name is required'));
-    }
-    
-    if (!this.code) {
-      return next(new Error('Code is required'));
-    }
-    
-    if (!this.factoryId) {
-      return next(new Error('Factory ID is required'));
-    }
-    
-    if (!this.type) {
-      return next(new Error('Type is required'));
-    }
-    
-    if (this.isNew) {
-      // التحقق من التكرار سيتم بواسطة MongoDB unique index
-    }
-    
-    return next();
-  } catch (error) {
-    return next(error);
+departmentSchema.pre('validate', async function() {
+  if (this.name) this.name = this.name.trim();
+  if (this.code) this.code = this.code.toUpperCase().trim();
+  if (this.description) this.description = this.description.trim();
+
+  const codeRegex = /^[A-Z0-9]+$/;
+  if (this.code && !codeRegex.test(this.code)) {
+    throw new Error('Code must contain only uppercase letters and numbers');
   }
 });
-*/
 
-// ============ PRE-VALIDATE MIDDLEWARE ============
-// ✅ تم التعليق لأن BaseModel يوفر Pre-validate
+// ============ PRE-SAVE MIDDLEWARE (async style — no `next` param) ============
 
-/*
-departmentSchema.pre('validate', function(next) {
-  try {
-    if (this.name) {
-      this.name = this.name.trim();
-    }
-    
-    if (this.code) {
-      this.code = this.code.toUpperCase().trim();
-    }
-    
-    if (this.description) {
-      this.description = this.description.trim();
-    }
-    
-    const codeRegex = /^[A-Z0-9]+$/;
-    if (this.code && !codeRegex.test(this.code)) {
-      return next(new Error('Code must contain only uppercase letters and numbers'));
-    }
-    
-    return next();
-  } catch (error) {
-    return next(error);
-  }
+departmentSchema.pre('save', async function() {
+  this.updatedAt = new Date();
+
+  if (!this.name) throw new Error('Name is required');
+  if (!this.code) throw new Error('Code is required');
+  if (!this.factoryId) throw new Error('Factory ID is required');
+  if (!this.type) throw new Error('Type is required');
 });
-*/
 
-// ============ PRE-FINDONEANDUPDATE MIDDLEWARE ============
-// ✅ تم التعليق لأن BaseModel يوفر Pre-findOneAndUpdate
+// ============ PRE-UPDATE HOOKS (findOneAndUpdate / updateOne / updateMany) ============
 
-/*
-departmentSchema.pre('findOneAndUpdate', function(next) {
-  try {
-    this.set({ updatedAt: new Date() });
-    return next();
-  } catch (error) {
-    return next(error);
-  }
+departmentSchema.pre(['findOneAndUpdate', 'updateOne', 'updateMany'], async function() {
+  this.set({ updatedAt: new Date() });
 });
-*/
-
-// ============ PRE-UPDATEONE MIDDLEWARE ============
-// ✅ تم التعليق لأن BaseModel يوفر Pre-updateOne
-
-/*
-departmentSchema.pre('updateOne', function(next) {
-  try {
-    this.set({ updatedAt: new Date() });
-    return next();
-  } catch (error) {
-    return next(error);
-  }
-});
-*/
-
-// ============ PRE-UPDATEMANY MIDDLEWARE ============
-// ✅ تم التعليق لأن BaseModel يوفر Pre-updateMany
-
-/*
-departmentSchema.pre('updateMany', function(next) {
-  try {
-    this.set({ updatedAt: new Date() });
-    return next();
-  } catch (error) {
-    return next(error);
-  }
-});
-*/
 
 // ============ POST-SAVE MIDDLEWARE ============
 
@@ -199,11 +122,17 @@ departmentSchema.post('save', function(doc) {
   console.log('✅ Department saved successfully:', doc._id);
 });
 
+// ⚠️ هام: error-handling middleware في mongoose/kareem بيتحدد بعدد الـ parameters
+// (fn.length). لازم يكون 3 (error, doc, next) عشان يتعرف عليه صح كـ error handler،
+// مش hook عادي. لو قللناه لباراميترين هيتعامل معاه كـ (doc, next) عادي، والـ error
+// هيبقى فعلياً الـ document المحفوظ (قيمة truthy دايماً) → false alarm بعد نجاح الحفظ.
+
 departmentSchema.post('save', function(error, doc, next) {
   if (error) {
     console.error('❌ Error saving department:', error.message);
+    return next(error);
   }
-  next(error);
+  next();
 });
 
 // ============ POST-FINDONEANDUPDATE MIDDLEWARE ============
@@ -212,6 +141,14 @@ departmentSchema.post('findOneAndUpdate', function(doc) {
   if (doc) {
     console.log('✅ Department updated successfully:', doc._id);
   }
+});
+
+departmentSchema.post('findOneAndUpdate', function(error, doc, next) {
+  if (error) {
+    console.error('❌ Error updating department:', error.message);
+    return next(error);
+  }
+  next();
 });
 
 // ============ METHODS ============
@@ -234,37 +171,44 @@ departmentSchema.methods.toPublicJSON = function() {
 departmentSchema.methods.toAdminJSON = function() {
   return {
     ...this.toPublicJSON(),
-    deletedAt: this.deletedAt
+    companyId: this.companyId,
+    deletedAt: this.deletedAt,
+    deletedBy: this.deletedBy,
+    deletedReason: this.deletedReason
   };
 };
 
 // ============ STATIC METHODS ============
 
-departmentSchema.statics.findByCode = function(code, factoryId) {
+departmentSchema.statics.findByCode = function(code, factoryId, companyId) {
   const query = { code: code.toUpperCase(), deletedAt: null };
   if (factoryId) query.factoryId = factoryId;
+  if (companyId) query.companyId = companyId;
   return this.findOne(query);
 };
 
-departmentSchema.statics.findByName = function(name, factoryId) {
+departmentSchema.statics.findByName = function(name, factoryId, companyId) {
   const query = { name: name.trim(), deletedAt: null };
   if (factoryId) query.factoryId = factoryId;
+  if (companyId) query.companyId = companyId;
   return this.findOne(query);
 };
 
-departmentSchema.statics.findByType = function(type, factoryId) {
+departmentSchema.statics.findByType = function(type, factoryId, companyId) {
   const query = { type, deletedAt: null };
   if (factoryId) query.factoryId = factoryId;
+  if (companyId) query.companyId = companyId;
   return this.find(query).sort({ name: 1 });
 };
 
-departmentSchema.statics.findActive = function(factoryId) {
+departmentSchema.statics.findActive = function(factoryId, companyId) {
   const query = { status: 'active', deletedAt: null };
   if (factoryId) query.factoryId = factoryId;
+  if (companyId) query.companyId = companyId;
   return this.find(query).sort({ name: 1 });
 };
 
-departmentSchema.statics.search = function(searchTerm, factoryId) {
+departmentSchema.statics.search = function(searchTerm, factoryId, companyId) {
   const searchRegex = new RegExp(searchTerm, 'i');
   const query = {
     deletedAt: null,
@@ -276,13 +220,15 @@ departmentSchema.statics.search = function(searchTerm, factoryId) {
     ]
   };
   if (factoryId) query.factoryId = factoryId;
+  if (companyId) query.companyId = companyId;
   return this.find(query).sort({ name: 1 });
 };
 
-departmentSchema.statics.getStats = async function(factoryId) {
+departmentSchema.statics.getStats = async function(factoryId, companyId) {
   const match = { deletedAt: null };
   if (factoryId) match.factoryId = factoryId;
-  
+  if (companyId) match.companyId = companyId;
+
   const stats = await this.aggregate([
     { $match: match },
     {
@@ -307,14 +253,15 @@ departmentSchema.statics.getStats = async function(factoryId) {
       }
     }
   ]);
-  
+
   return stats[0] || { total: 0, active: 0, inactive: 0, archived: 0 };
 };
 
-departmentSchema.statics.getTypeDistribution = async function(factoryId) {
+departmentSchema.statics.getTypeDistribution = async function(factoryId, companyId) {
   const match = { deletedAt: null };
   if (factoryId) match.factoryId = factoryId;
-  
+  if (companyId) match.companyId = companyId;
+
   return this.aggregate([
     { $match: match },
     {
@@ -327,11 +274,10 @@ departmentSchema.statics.getTypeDistribution = async function(factoryId) {
   ]);
 };
 
-departmentSchema.statics.findByFactory = async function(factoryId) {
-  return this.find({
-    factoryId,
-    deletedAt: null
-  }).sort({ name: 1 });
+departmentSchema.statics.findByFactory = async function(factoryId, companyId) {
+  const query = { factoryId, deletedAt: null };
+  if (companyId) query.companyId = companyId;
+  return this.find(query).sort({ name: 1 });
 };
 
 // ============ EXPORT ============
