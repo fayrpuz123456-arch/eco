@@ -8,7 +8,7 @@ const BaseModel = require('../../../core/base/BaseModel');
 const productionLineSchema = BaseModel.createSchema({
   // ===== Base Fields (مضافة من BaseModel) =====
   // companyId, createdBy, updatedBy, createdAt, updatedAt, deletedAt, status, metadata
-  
+
   // ===== Additional Fields =====
   factoryId: { type: String, required: true, index: true },
   departmentId: { type: String, required: true, index: true },
@@ -313,7 +313,7 @@ productionLineSchema.virtual('isActive').get(function() {
 });
 
 productionLineSchema.virtual('isRunning').get(function() {
-  return this.status === 'active' && this.operatingDetails.lastStartTime && 
+  return this.status === 'active' && this.operatingDetails.lastStartTime &&
          (!this.operatingDetails.lastStopTime || this.operatingDetails.lastStartTime > this.operatingDetails.lastStopTime);
 });
 
@@ -329,173 +329,133 @@ productionLineSchema.virtual('overallEfficiency').get(function() {
   return this.performance.oee || 0;
 });
 
-// ============ PRE-SAVE MIDDLEWARE (تم التعديل النهائي) ============
+// ============ PRE-VALIDATE MIDDLEWARE (merged, async style — no `next` param) ============
+// ✅ استخدام async/await بدل next() يمنع أي تعارض بين hooks متعددة
+//    (سبب الخطأ "next is not a function" غالباً تعارض توقيع الدوال بين هوكس متعددة
+//    أو استدعاء next من هوك مسجل مرتين بصيغ مختلفة)
 
-productionLineSchema.pre('save', function(next) {
-  try {
-    // تحديث updatedAt تلقائياً
-    this.updatedAt = new Date();
-    
-    // تنظيف البيانات
-    if (this.name) this.name = this.name.trim();
-    if (this.code) this.code = this.code.toUpperCase().trim();
-    if (this.description) this.description = this.description.trim();
-    
-    // تنظيف بيانات المواد الخام
-    if (this.materials && this.materials.rawMaterials) {
-      for (const material of this.materials.rawMaterials) {
-        if (material.name) material.name = material.name.trim();
-        if (material.code) material.code = material.code.trim();
-      }
+productionLineSchema.pre('validate', async function() {
+  // تنظيف البيانات
+  if (this.name) this.name = this.name.trim();
+  if (this.code) this.code = this.code.toUpperCase().trim();
+  if (this.description) this.description = this.description.trim();
+
+  // التحقق من أن أوقات التشغيل صحيحة
+  if (this.operatingDetails && this.operatingDetails.operatingHours) {
+    const timeRegex = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/;
+    if (this.operatingDetails.operatingHours.start &&
+        !timeRegex.test(this.operatingDetails.operatingHours.start)) {
+      throw new Error('Invalid start time format. Use HH:MM');
     }
-    
-    // تنظيف بيانات المنتجات النهائية
-    if (this.materials && this.materials.finishedGoods) {
-      for (const good of this.materials.finishedGoods) {
-        if (good.name) good.name = good.name.trim();
-        if (good.code) good.code = good.code.trim();
-      }
+    if (this.operatingDetails.operatingHours.end &&
+        !timeRegex.test(this.operatingDetails.operatingHours.end)) {
+      throw new Error('Invalid end time format. Use HH:MM');
     }
-    
-    // التحقق من البيانات المطلوبة
-    if (!this.name) {
-      return next(new Error('Name is required'));
-    }
-    
-    if (!this.code) {
-      return next(new Error('Code is required'));
-    }
-    
-    if (!this.factoryId) {
-      return next(new Error('Factory ID is required'));
-    }
-    
-    if (!this.departmentId) {
-      return next(new Error('Department ID is required'));
-    }
-    
-    if (!this.type) {
-      return next(new Error('Type is required'));
-    }
-    
-    // التحقق من صحة الكود
-    const codeRegex = /^[A-Z0-9]+$/;
-    if (this.code && !codeRegex.test(this.code)) {
-      return next(new Error('Code must contain only uppercase letters and numbers'));
-    }
-    
-    // حساب OEE تلقائياً إذا كانت البيانات متوفرة
-    if (this.performance && this.performance.availability && 
-        this.performance.performance && this.performance.quality) {
-      this.calculateOEE();
-    }
-    
-    // تحديث lastUpdated للحقول الفرعية
-    this.performance.lastUpdated = new Date();
-    this.quality.lastUpdated = new Date();
-    this.machines.lastUpdated = new Date();
-    this.sensors.lastUpdated = new Date();
-    this.employees.lastUpdated = new Date();
-    this.environmental.lastUpdated = new Date();
-    this.cost.lastUpdated = new Date();
-    this.materials.lastUpdated = new Date();
-    
-    // ✅ استدعاء next() في النهاية
-    return next();
-  } catch (error) {
-    // ✅ في حالة الخطأ، مرر الخطأ لـ next
-    return next(error);
+  }
+
+  // التحقق من صحة الكود
+  const codeRegex = /^[A-Z0-9]+$/;
+  if (this.code && !codeRegex.test(this.code)) {
+    throw new Error('Code must contain only uppercase letters and numbers');
   }
 });
 
-// ============ PRE-VALIDATE MIDDLEWARE ============
+// ============ PRE-SAVE MIDDLEWARE (async style — no `next` param) ============
 
-productionLineSchema.pre('validate', function(next) {
-  try {
-    // التحقق من صحة البيانات قبل الحفظ
-    if (this.name) {
-      this.name = this.name.trim();
+productionLineSchema.pre('save', async function() {
+  // تحديث updatedAt تلقائياً
+  this.updatedAt = new Date();
+
+  // تنظيف بيانات المواد الخام
+  if (this.materials && this.materials.rawMaterials) {
+    for (const material of this.materials.rawMaterials) {
+      if (material.name) material.name = material.name.trim();
+      if (material.code) material.code = material.code.trim();
     }
-    
-    if (this.code) {
-      this.code = this.code.toUpperCase().trim();
-    }
-    
-    if (this.description) {
-      this.description = this.description.trim();
-    }
-    
-    // التحقق من أن أوقات التشغيل صحيحة
-    if (this.operatingDetails && this.operatingDetails.operatingHours) {
-      const timeRegex = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/;
-      if (this.operatingDetails.operatingHours.start && 
-          !timeRegex.test(this.operatingDetails.operatingHours.start)) {
-        return next(new Error('Invalid start time format. Use HH:MM'));
-      }
-      if (this.operatingDetails.operatingHours.end && 
-          !timeRegex.test(this.operatingDetails.operatingHours.end)) {
-        return next(new Error('Invalid end time format. Use HH:MM'));
-      }
-    }
-    
-    return next();
-  } catch (error) {
-    return next(error);
   }
+
+  // تنظيف بيانات المنتجات النهائية
+  if (this.materials && this.materials.finishedGoods) {
+    for (const good of this.materials.finishedGoods) {
+      if (good.name) good.name = good.name.trim();
+      if (good.code) good.code = good.code.trim();
+    }
+  }
+
+  // التحقق من البيانات المطلوبة
+  if (!this.name) throw new Error('Name is required');
+  if (!this.code) throw new Error('Code is required');
+  if (!this.factoryId) throw new Error('Factory ID is required');
+  if (!this.departmentId) throw new Error('Department ID is required');
+  if (!this.type) throw new Error('Type is required');
+
+  // حساب OEE تلقائياً إذا كانت البيانات متوفرة
+  if (this.performance && this.performance.availability &&
+      this.performance.performance && this.performance.quality) {
+    this.calculateOEE();
+  }
+
+  // تحديث lastUpdated للحقول الفرعية
+  const now = new Date();
+  this.performance.lastUpdated = now;
+  this.quality.lastUpdated = now;
+  this.machines.lastUpdated = now;
+  this.sensors.lastUpdated = now;
+  this.employees.lastUpdated = now;
+  this.environmental.lastUpdated = now;
+  this.cost.lastUpdated = now;
+  this.materials.lastUpdated = now;
 });
 
-// ============ PRE-FINDONEANDUPDATE MIDDLEWARE ============
+// ============ PRE-UPDATE HOOKS (findOneAndUpdate / updateOne / updateMany) ============
+// دمج الثلاثة في نفس المنطق بصيغة async واحدة لكل منها
 
-productionLineSchema.pre('findOneAndUpdate', function(next) {
-  try {
-    this.set({ updatedAt: new Date() });
-    return next();
-  } catch (error) {
-    return next(error);
-  }
+productionLineSchema.pre(['findOneAndUpdate', 'updateOne', 'updateMany'], async function() {
+  this.set({ updatedAt: new Date() });
 });
 
-// ============ PRE-UPDATEONE MIDDLEWARE ============
-
-productionLineSchema.pre('updateOne', function(next) {
-  try {
-    this.set({ updatedAt: new Date() });
-    return next();
-  } catch (error) {
-    return next(error);
-  }
-});
-
-// ============ PRE-UPDATEMANY MIDDLEWARE ============
-
-productionLineSchema.pre('updateMany', function(next) {
-  try {
-    this.set({ updatedAt: new Date() });
-    return next();
-  } catch (error) {
-    return next(error);
-  }
-});
-
-// ============ POST-SAVE MIDDLEWARE ============
+// ============ ✅ POST-SAVE - SUCCESS ============
 
 productionLineSchema.post('save', function(doc) {
   console.log('✅ Production line saved successfully:', doc._id);
 });
 
+// ============ ✅ POST-SAVE - ERROR HANDLER ============
+// ⚠️ مهم جداً: mongoose/kareem يميّز "error-handling middleware" عن الـ hook العادي
+// بعدد الـ parameters المعلنة في الدالة (fn.length):
+//   - 2 parameters  → يُعامَل كـ hook عادي (doc, next)
+//   - 3 parameters  → يُعامَل كـ error handler (error, doc, next)
+// لو قللنا الباراميترات لـ (error, doc) فقط، mongoose هيفتكر إن الدالة دي hook عادي،
+// وهيبعت له (doc, next) بدل (error, doc)! يعني "error" هيبقى فعلياً الـ document المحفوظ
+// (قيمة truthy دايماً)، وده اللي كان بيسبب الخطأ الوهمي بعد نجاح الحفظ فعلياً.
+// عشان كده لازم نسيب التوقيع بـ 3 باراميترات هنا (مع next) عشان mongoose يتعرف عليه صح.
+
 productionLineSchema.post('save', function(error, doc, next) {
   if (error) {
     console.error('❌ Error saving production line:', error.message);
+    return next(error);
   }
-  next(error);
+  next();
 });
 
-// ============ POST-FINDONEANDUPDATE MIDDLEWARE ============
+// ============ ✅ POST-FINDONEANDUPDATE - SUCCESS ============
 
 productionLineSchema.post('findOneAndUpdate', function(doc) {
   if (doc) {
     console.log('✅ Production line updated successfully:', doc._id);
   }
+});
+
+// ============ ✅ POST-FINDONEANDUPDATE - ERROR HANDLER ============
+// نفس السبب بالظبط: لازم 3 باراميترات (error, doc, next) عشان mongoose يتعرف
+// إنها error-handling middleware مش hook عادي.
+
+productionLineSchema.post('findOneAndUpdate', function(error, doc, next) {
+  if (error) {
+    console.error('❌ Error updating production line:', error.message);
+    return next(error);
+  }
+  next();
 });
 
 // ============ METHODS ============
@@ -817,7 +777,7 @@ productionLineSchema.statics.getProductionLineStats = async function(productionL
       }
     }
   ]);
-  
+
   return stats[0] || null;
 };
 
@@ -843,7 +803,7 @@ productionLineSchema.statics.getDepartmentProductionLineStats = async function(d
       }
     }
   ]);
-  
+
   return stats[0] || {
     total: 0,
     active: 0,
@@ -865,7 +825,7 @@ productionLineSchema.statics.getTypeDistribution = async function(departmentId, 
   const query = { deletedAt: null };
   if (departmentId) query.departmentId = departmentId;
   if (companyId) query.companyId = companyId;
-  
+
   return this.aggregate([
     { $match: query },
     {
@@ -885,7 +845,7 @@ productionLineSchema.statics.getCategoryDistribution = async function(department
   const query = { deletedAt: null };
   if (departmentId) query.departmentId = departmentId;
   if (companyId) query.companyId = companyId;
-  
+
   return this.aggregate([
     { $match: query },
     {
