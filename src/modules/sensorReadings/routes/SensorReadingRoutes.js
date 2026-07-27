@@ -1,12 +1,59 @@
 const express = require('express');
 const router = express.Router();
 const SensorReading = require('../models/SensorReading.model');
+const { authMiddleware } = require('../../../core/middleware/auth');
+const { tenantMiddleware } = require('../../../core/middleware/tenant');
+const logger = require('../../../core/utils/logger');
+
+// ✅ تطبيق الـ Middleware
+router.use(authMiddleware);
+router.use(tenantMiddleware(true));
+
+// ===== Helper function للحصول على companyId =====
+const getCompanyId = (req) => {
+  return req.body?.companyId || req.headers?.['x-company-id'] || req.companyId;
+};
 
 // ===== POST - إضافة قراءة جديدة =====
 router.post('/', async (req, res) => {
   try {
-    const { sensorId, value, unit, timestamp, quality, companyId, factoryId, machineId } = req.body;
+    // ✅ استخدام companyId من الـ Body أو الـ Header أو الـ Auth
+    const companyId = getCompanyId(req);
+    const userId = req.user?.id;
 
+    if (!companyId || !userId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Unauthorized: user/company context missing from request'
+      });
+    }
+
+    // ✅ التحقق من صحة companyId (يدعم ObjectId و comp_)
+    const isValidObjectId = /^[0-9a-fA-F]{24}$/.test(companyId);
+    const isValidCompanyCode = companyId.startsWith('comp_') && companyId.length >= 10;
+    
+    if (!isValidObjectId && !isValidCompanyCode) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
+        received: companyId
+      });
+    }
+
+    const { 
+      sensorId, 
+      value, 
+      unit, 
+      timestamp, 
+      quality, 
+      factoryId, 
+      machineId,
+      departmentId,
+      productionLineId,
+      metadata
+    } = req.body;
+
+    // ✅ التحقق من الحقول المطلوبة
     if (!sensorId || value === undefined || !unit) {
       return res.status(400).json({
         success: false,
@@ -14,21 +61,60 @@ router.post('/', async (req, res) => {
       });
     }
 
-    // ✅ إضافة الحقول المطلوبة مع قيم افتراضية من headers أو body
+    // ✅ التحقق من وجود factoryId و machineId
+    if (!factoryId) {
+      return res.status(400).json({
+        success: false,
+        message: 'factoryId is required'
+      });
+    }
+
+    if (!machineId) {
+      return res.status(400).json({
+        success: false,
+        message: 'machineId is required'
+      });
+    }
+
+    // ✅ إنشاء القراءة الجديدة
     const newReading = new SensorReading({
       sensorId,
-      value,
-      unit,
+      value: parseFloat(value),
+      unit: unit.trim(),
       timestamp: timestamp || new Date(),
       quality: quality || 'good',
-      companyId: companyId || req.headers['x-company-id'] || 'comp_test_001',
-      factoryId: factoryId || req.body.factoryId,
-      departmentId: req.body.departmentId || null,
-      productionLineId: req.body.productionLineId || null,
-      machineId: machineId || req.body.machineId
+      companyId, // ✅ استخدام companyId الصحيح
+      factoryId,
+      machineId,
+      departmentId: departmentId || null,
+      productionLineId: productionLineId || null,
+      metadata: metadata || {},
+      createdBy: userId,
+      updatedBy: userId,
+      status: 'active'
     });
 
     const savedReading = await newReading.save();
+
+    // ✅ تحديث آخر قراءة في الـ Sensor
+    try {
+      const Sensor = require('../models/Sensor.model');
+      await Sensor.updateOne(
+        { _id: sensorId, companyId },
+        {
+          $set: {
+            'readings.lastValue': parseFloat(value),
+            'readings.lastReadingAt': new Date(),
+            'readings.lastUpdated': new Date()
+          },
+          $inc: { 'readings.totalReadings': 1 },
+          $min: { 'readings.minValue': parseFloat(value) },
+          $max: { 'readings.maxValue': parseFloat(value) }
+        }
+      );
+    } catch (updateError) {
+      logger.warn('⚠️ Could not update sensor readings:', updateError.message);
+    }
 
     res.status(201).json({
       success: true,
@@ -36,11 +122,21 @@ router.post('/', async (req, res) => {
       data: savedReading
     });
   } catch (error) {
-    console.error('❌ Error adding sensor reading:', error);
+    logger.error('❌ Error adding sensor reading:', error);
+    
+    if (error.name === 'ValidationError') {
+      const errors = Object.values(error.errors).map(err => err.message);
+      return res.status(400).json({
+        success: false,
+        message: 'Validation error',
+        errors: errors
+      });
+    }
+
     res.status(500).json({
       success: false,
       message: 'Error adding sensor reading',
-      error: error.message
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
 });
@@ -48,40 +144,84 @@ router.post('/', async (req, res) => {
 // ===== GET - قراءات حساس معين =====
 router.get('/sensor/:sensorId', async (req, res) => {
   try {
-    const { sensorId } = req.params;
-    const { limit = 100, from, to } = req.query;
+    // ✅ استخدام companyId من الـ Body أو الـ Header أو الـ Auth
+    const companyId = getCompanyId(req);
 
-    const query = { sensorId };
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'companyId مطلوب في الـ Body أو الـ Header (x-company-id) أو من الـ Auth'
+      });
+    }
+
+    const { sensorId } = req.params;
+    const { limit = 100, from, to, page = 1 } = req.query;
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    const query = { 
+      sensorId,
+      companyId,
+      deletedAt: null 
+    };
+    
     if (from) query.timestamp = { $gte: new Date(from) };
     if (to) query.timestamp = { ...query.timestamp, $lte: new Date(to) };
 
-    const readings = await SensorReading.find(query)
-      .sort({ timestamp: -1 })
-      .limit(parseInt(limit))
-      .select('-__v');
+    const [readings, total] = await Promise.all([
+      SensorReading.find(query)
+        .sort({ timestamp: -1 })
+        .skip(skip)
+        .limit(parseInt(limit))
+        .select('-__v'),
+      SensorReading.countDocuments(query)
+    ]);
 
     res.json({
       success: true,
       message: 'Readings retrieved successfully',
       data: readings,
-      count: readings.length
+      count: readings.length,
+      meta: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        totalPages: Math.ceil(total / parseInt(limit)),
+        hasNext: skip + readings.length < total,
+        hasPrev: parseInt(page) > 1
+      }
     });
   } catch (error) {
-    console.error('❌ Error fetching readings:', error);
+    logger.error('❌ Error fetching readings:', error);
     res.status(500).json({
       success: false,
       message: 'Error fetching readings',
-      error: error.message
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
 });
 
 // ===== GET - آخر قراءة لحساس =====
-router.get('/last/:sensorId', async (req, res) => {
+router.get('/sensor/:sensorId/latest', async (req, res) => {
   try {
+    // ✅ استخدام companyId من الـ Body أو الـ Header أو الـ Auth
+    const companyId = getCompanyId(req);
+
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'companyId مطلوب في الـ Body أو الـ Header (x-company-id) أو من الـ Auth'
+      });
+    }
+
     const { sensorId } = req.params;
-    const reading = await SensorReading.findOne({ sensorId })
-      .sort({ timestamp: -1 });
+
+    const reading = await SensorReading.findOne({
+      sensorId,
+      companyId,
+      deletedAt: null
+    })
+    .sort({ timestamp: -1 })
+    .select('-__v');
 
     if (!reading) {
       return res.status(404).json({
@@ -92,30 +232,145 @@ router.get('/last/:sensorId', async (req, res) => {
 
     res.json({
       success: true,
-      message: 'Last reading retrieved successfully',
+      message: 'Latest reading retrieved successfully',
       data: reading
     });
   } catch (error) {
-    console.error('❌ Error fetching last reading:', error);
+    logger.error('❌ Error fetching latest reading:', error);
     res.status(500).json({
       success: false,
-      message: 'Error fetching last reading',
-      error: error.message
+      message: 'Error fetching latest reading',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
 });
 
-// ===== GET - إحصائيات قراءات =====
-router.get('/stats/:sensorId', async (req, res) => {
+// ===== GET - قراءات ماكينة معينة =====
+router.get('/machine/:machineId', async (req, res) => {
   try {
-    const { sensorId } = req.params;
-    const { from, to } = req.query;
+    // ✅ استخدام companyId من الـ Body أو الـ Header أو الـ Auth
+    const companyId = getCompanyId(req);
 
-    const query = { sensorId };
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'companyId مطلوب في الـ Body أو الـ Header (x-company-id) أو من الـ Auth'
+      });
+    }
+
+    const { machineId } = req.params;
+    const { limit = 100, from, to, page = 1 } = req.query;
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    const query = {
+      machineId,
+      companyId,
+      deletedAt: null
+    };
+
     if (from) query.timestamp = { $gte: new Date(from) };
     if (to) query.timestamp = { ...query.timestamp, $lte: new Date(to) };
 
-    const readings = await SensorReading.find(query);
+    const [readings, total] = await Promise.all([
+      SensorReading.find(query)
+        .sort({ timestamp: -1 })
+        .skip(skip)
+        .limit(parseInt(limit))
+        .select('-__v'),
+      SensorReading.countDocuments(query)
+    ]);
+
+    res.json({
+      success: true,
+      message: 'Machine readings retrieved successfully',
+      data: readings,
+      count: readings.length,
+      meta: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        totalPages: Math.ceil(total / parseInt(limit)),
+        hasNext: skip + readings.length < total,
+        hasPrev: parseInt(page) > 1
+      }
+    });
+  } catch (error) {
+    logger.error('❌ Error fetching machine readings:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching machine readings',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
+  }
+});
+
+// ===== GET - قراءة بالمعرف =====
+router.get('/:id', async (req, res) => {
+  try {
+    // ✅ استخدام companyId من الـ Body أو الـ Header أو الـ Auth
+    const companyId = getCompanyId(req);
+
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'companyId مطلوب في الـ Body أو الـ Header (x-company-id) أو من الـ Auth'
+      });
+    }
+
+    const reading = await SensorReading.findOne({
+      _id: req.params.id,
+      companyId,
+      deletedAt: null
+    }).select('-__v');
+
+    if (!reading) {
+      return res.status(404).json({
+        success: false,
+        message: 'Reading not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Reading retrieved successfully',
+      data: reading
+    });
+  } catch (error) {
+    logger.error('❌ Error fetching reading:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching reading',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
+  }
+});
+
+// ===== GET - إحصائيات قراءات حساس =====
+router.get('/stats/:sensorId', async (req, res) => {
+  try {
+    // ✅ استخدام companyId من الـ Body أو الـ Header أو الـ Auth
+    const companyId = getCompanyId(req);
+
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'companyId مطلوب في الـ Body أو الـ Header (x-company-id) أو من الـ Auth'
+      });
+    }
+
+    const { sensorId } = req.params;
+    const { from, to } = req.query;
+
+    const query = { 
+      sensorId,
+      companyId,
+      deletedAt: null 
+    };
+    
+    if (from) query.timestamp = { $gte: new Date(from) };
+    if (to) query.timestamp = { ...query.timestamp, $lte: new Date(to) };
+
+    const readings = await SensorReading.find(query).sort({ timestamp: -1 });
 
     if (readings.length === 0) {
       return res.json({
@@ -126,7 +381,8 @@ router.get('/stats/:sensorId', async (req, res) => {
           avg: 0,
           min: 0,
           max: 0,
-          lastValue: null
+          lastValue: null,
+          lastReadingAt: null
         }
       });
     }
@@ -142,15 +398,63 @@ router.get('/stats/:sensorId', async (req, res) => {
         avg: parseFloat(avg.toFixed(2)),
         min: Math.min(...values),
         max: Math.max(...values),
-        lastValue: readings[0]?.value || 0
+        lastValue: readings[0]?.value || 0,
+        lastReadingAt: readings[0]?.timestamp || null,
+        firstReadingAt: readings[readings.length - 1]?.timestamp || null
       }
     });
   } catch (error) {
-    console.error('❌ Error fetching statistics:', error);
+    logger.error('❌ Error fetching statistics:', error);
     res.status(500).json({
       success: false,
       message: 'Error fetching statistics',
-      error: error.message
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
+  }
+});
+
+// ===== DELETE - حذف قراءة (Soft Delete) =====
+router.delete('/:id', async (req, res) => {
+  try {
+    // ✅ استخدام companyId من الـ Body أو الـ Header أو الـ Auth
+    const companyId = getCompanyId(req);
+    const userId = req.user?.id;
+
+    if (!companyId || !userId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Unauthorized: user/company context missing from request'
+      });
+    }
+
+    const reading = await SensorReading.findOne({
+      _id: req.params.id,
+      companyId,
+      deletedAt: null
+    });
+
+    if (!reading) {
+      return res.status(404).json({
+        success: false,
+        message: 'Reading not found'
+      });
+    }
+
+    reading.deletedAt = new Date();
+    reading.deletedBy = userId;
+    reading.status = 'archived';
+    await reading.save();
+
+    res.json({
+      success: true,
+      message: 'Reading deleted successfully'
+    });
+  } catch (error) {
+    logger.error('❌ Error deleting reading:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error deleting reading',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
 });

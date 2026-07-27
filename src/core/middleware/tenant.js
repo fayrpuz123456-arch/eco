@@ -10,46 +10,95 @@ const logger = require('../utils/logger');
 const tenantMiddleware = (required = true) => {
   return async (req, res, next) => {
     try {
-      // 1. الحصول على companyId من مصادر مختلفة
-      const companyId = req.headers['x-company-id'] || 
-                        req.headers['company-id'] ||
-                        req.headers['x-tenant-id'] ||
-                        req.headers['tenant-id'] ||
-                        req.query.companyId ||
-                        req.query.company_id ||
-                        req.body.companyId ||
-                        req.body.company_id ||
-                        req.params.companyId ||
-                        req.params.company_id ||
+      // ✅ التحقق من وجود req و headers
+      if (!req) {
+        logger.error('❌ Tenant middleware: req is undefined');
+        return res.status(500).json({
+          success: false,
+          message: 'Internal server error: request object missing'
+        });
+      }
+
+      // ✅ التحقق من وجود headers
+      if (!req.headers) {
+        logger.error('❌ Tenant middleware: headers is undefined');
+        return res.status(500).json({
+          success: false,
+          message: 'Internal server error: headers missing'
+        });
+      }
+
+      // ✅ 1. الحصول على companyId من مصادر مختلفة (مع optional chaining)
+      const companyId = req.headers?.['x-company-id'] || 
+                        req.headers?.['company-id'] ||
+                        req.headers?.['x-tenant-id'] ||
+                        req.headers?.['tenant-id'] ||
+                        req.query?.companyId ||
+                        req.query?.company_id ||
+                        req.body?.companyId ||
+                        req.body?.company_id ||
+                        req.params?.companyId ||
+                        req.params?.company_id ||
                         req.user?.claims?.companyId ||
                         req.companyId ||
                         null;
 
-      // 2. التحقق من صحة companyId إذا كان موجوداً
+      // ✅ 2. تسجيل المصدر للـ Debug
+      const source = req.headers?.['x-company-id'] ? 'header(x-company-id)' :
+                     req.headers?.['company-id'] ? 'header(company-id)' :
+                     req.headers?.['x-tenant-id'] ? 'header(x-tenant-id)' :
+                     req.headers?.['tenant-id'] ? 'header(tenant-id)' :
+                     req.query?.companyId ? 'query(companyId)' :
+                     req.query?.company_id ? 'query(company_id)' :
+                     req.body?.companyId ? 'body(companyId)' :
+                     req.body?.company_id ? 'body(company_id)' :
+                     req.params?.companyId ? 'params(companyId)' :
+                     req.params?.company_id ? 'params(company_id)' :
+                     req.user?.claims?.companyId ? 'claims' :
+                     req.companyId ? 'auth' :
+                     'none';
+
+      // ✅ 3. التحقق من صحة companyId إذا كان موجوداً
       if (companyId) {
-        // التحقق من أن companyId يبدأ بـ comp_
-        if (!companyId.startsWith('comp_')) {
+        // ✅ دعم كلا الصيغتين: ObjectId (24 حرف Hex) و comp_xxxxx
+        const isValidObjectId = /^[0-9a-fA-F]{24}$/.test(companyId);
+        const isValidCompanyCode = companyId.startsWith('comp_') && companyId.length >= 10;
+        
+        if (!isValidObjectId && !isValidCompanyCode) {
           logger.warn('Invalid company ID format', {
             companyId,
             ip: req.ip,
             path: req.path,
             method: req.method
           });
-          return sendError(res, 400, 'Invalid company ID format. Company ID must start with "comp_"');
+          
+          return res.status(400).json({
+            success: false,
+            message: 'Invalid company ID format. Must be either:',
+            hints: [
+              'ObjectId format: 6a566d7dc5a193281f058331',
+              'Company code format: comp_xxxxxxxxx'
+            ],
+            received: companyId
+          });
         }
 
-        // التحقق من طول companyId
-        if (companyId.length < 10) {
+        // التحقق من طول companyId (للـ comp_xxxxx)
+        if (companyId.startsWith('comp_') && companyId.length < 10) {
           logger.warn('Company ID too short', {
             companyId,
             ip: req.ip,
             path: req.path
           });
-          return sendError(res, 400, 'Invalid company ID. Company ID is too short');
+          return res.status(400).json({
+            success: false,
+            message: 'Invalid company ID. Company ID is too short',
+            received: companyId
+          });
         }
       }
 
-      // 3. التحقق من وجود companyId إذا كان مطلوباً
+      // ✅ 4. التحقق من وجود companyId إذا كان مطلوباً
       if (!companyId && required) {
         logger.warn('Tenant context missing', {
           ip: req.ip,
@@ -59,30 +108,42 @@ const tenantMiddleware = (required = true) => {
           user: req.user?.id
         });
         
-        return sendError(res, 400, 'Company ID is required. Please provide x-company-id header.');
+        return res.status(400).json({
+          success: false,
+          message: 'Company ID is required. Please provide via:',
+          hints: [
+            'Header: x-company-id: {company_id}',
+            'Body: { "companyId": "comp_xxx" }',
+            'Authentication: from Firebase token'
+          ]
+        });
       }
 
-      // 4. إذا لم يكن مطلوباً ولا يوجد companyId، نمرر بدون Tenant
+      // ✅ 5. إذا لم يكن مطلوباً ولا يوجد companyId، نمرر بدون Tenant
       if (!companyId && !required) {
         req.tenant = {
           companyId: null,
           isRequired: false,
-          isIsolated: false
+          isIsolated: false,
+          source: source
         };
         return next();
       }
 
-      // 5. إضافة Tenant Context إلى الـ Request
+      // ✅ 6. إضافة Tenant Context إلى الـ Request
       req.tenant = {
         companyId: companyId,
         isRequired: required,
-        isIsolated: true
+        isIsolated: true,
+        source: source,
+        isValid: true
       };
 
-      // 6. إضافة companyId للـ Request للاستخدام السهل
+      // ✅ 7. إضافة companyId للـ Request للاستخدام السهل
       req.companyId = companyId;
+      req.tenantSource = source;
 
-      // 7. إضافة دوال مساعدة لتصفية البيانات
+      // ✅ 8. إضافة دوال مساعدة لتصفية البيانات
       req.addCompanyFilter = (query = {}) => {
         if (companyId) {
           return { ...query, companyId };
@@ -97,7 +158,7 @@ const tenantMiddleware = (required = true) => {
         return query;
       };
 
-      // 8. إضافة دالة للتحقق من الوصول للشركة
+      // ✅ 9. إضافة دالة للتحقق من الوصول للشركة
       req.validateCompanyAccess = (targetCompanyId) => {
         if (!companyId) {
           throw new Error('No tenant context available');
@@ -108,30 +169,40 @@ const tenantMiddleware = (required = true) => {
         return true;
       };
 
-      // 9. إضافة دالة للتحقق من صحة companyId
+      // ✅ 10. إضافة دالة للتحقق من صحة companyId
       req.isValidCompanyId = (id) => {
-        return id && id.startsWith('comp_') && id.length >= 10;
+        if (!id) return false;
+        const isValidObjectId = /^[0-9a-fA-F]{24}$/.test(id);
+        const isValidCompanyCode = id.startsWith('comp_') && id.length >= 10;
+        return isValidObjectId || isValidCompanyCode;
       };
 
-      // 10. تسجيل الـ Tenant Context
-      logger.debug('Tenant context set', {
-        companyId,
-        required,
-        path: req.path,
-        method: req.method,
-        userId: req.user?.id
-      });
+      // ✅ 11. تسجيل الـ Tenant Context (في development فقط)
+      if (process.env.NODE_ENV !== 'production') {
+        logger.debug(`🔍 Tenant context set`, {
+          companyId,
+          source,
+          required,
+          path: req.path,
+          method: req.method,
+          userId: req.user?.id
+        });
+      }
 
       next();
 
     } catch (error) {
-      logger.error('Tenant middleware error', error, {
-        ip: req.ip,
-        path: req.path,
-        method: req.method
+      logger.error('❌ Tenant middleware error:', error, {
+        ip: req?.ip,
+        path: req?.path,
+        method: req?.method
       });
       
-      return sendError(res, 500, 'Tenant context error. Please try again later.');
+      return res.status(500).json({
+        success: false,
+        message: 'Tenant context error. Please try again later.',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
     }
   };
 };
@@ -153,8 +224,11 @@ const ensureTenantIsolation = (serviceMethod) => {
         throw new Error('Company ID required for tenant isolation');
       }
       
-      if (!companyId.startsWith('comp_')) {
-        throw new Error('Invalid company ID format. Must start with "comp_"');
+      const isValidObjectId = /^[0-9a-fA-F]{24}$/.test(companyId);
+      const isValidCompanyCode = companyId.startsWith('comp_') && companyId.length >= 10;
+      
+      if (!isValidObjectId && !isValidCompanyCode) {
+        throw new Error('Invalid company ID format. Must be ObjectId or start with "comp_"');
       }
       
       return serviceMethod.apply(this, [...args.slice(0, -1), { companyId, ...rest }]);
@@ -179,16 +253,22 @@ const validateTenant = async (companyId, req) => {
     }
 
     // 2. التحقق من صحة format companyId
-    if (!companyId.startsWith('comp_')) {
-      return { valid: false, error: 'Invalid company ID format. Must start with "comp_"' };
+    const isValidObjectId = /^[0-9a-fA-F]{24}$/.test(companyId);
+    const isValidCompanyCode = companyId.startsWith('comp_') && companyId.length >= 10;
+    
+    if (!isValidObjectId && !isValidCompanyCode) {
+      return { 
+        valid: false, 
+        error: 'Invalid company ID format. Must be ObjectId or start with "comp_"' 
+      };
     }
 
-    if (companyId.length < 10) {
+    if (companyId.startsWith('comp_') && companyId.length < 10) {
       return { valid: false, error: 'Company ID is too short' };
     }
 
     // 3. التحقق من أن المستخدم لديه حق الوصول لهذه الشركة
-    if (req.user) {
+    if (req?.user) {
       const userCompanyId = req.user.claims?.companyId || req.companyId || req.user.mongoData?.companyId;
       const userRole = req.user.role || req.user.claims?.role || 'viewer';
       
@@ -245,8 +325,11 @@ const createTenantFilter = (companyId, additionalFilters = {}) => {
     throw new Error('Company ID is required to create tenant filter');
   }
   
-  if (!companyId.startsWith('comp_')) {
-    throw new Error('Invalid company ID format. Must start with "comp_"');
+  const isValidObjectId = /^[0-9a-fA-F]{24}$/.test(companyId);
+  const isValidCompanyCode = companyId.startsWith('comp_') && companyId.length >= 10;
+  
+  if (!isValidObjectId && !isValidCompanyCode) {
+    throw new Error('Invalid company ID format. Must be ObjectId or start with "comp_"');
   }
   
   return {
@@ -265,8 +348,11 @@ const addTenantFilterToQuery = (query, companyId) => {
     throw new Error('Company ID is required to add tenant filter');
   }
   
-  if (!companyId.startsWith('comp_')) {
-    throw new Error('Invalid company ID format. Must start with "comp_"');
+  const isValidObjectId = /^[0-9a-fA-F]{24}$/.test(companyId);
+  const isValidCompanyCode = companyId.startsWith('comp_') && companyId.length >= 10;
+  
+  if (!isValidObjectId && !isValidCompanyCode) {
+    throw new Error('Invalid company ID format. Must be ObjectId or start with "comp_"');
   }
   
   return {
@@ -288,9 +374,12 @@ const hasTenantFilter = (query) => {
  * @param {object} query - Query object
  */
 const isValidTenantFilter = (query) => {
-  return query && query.companyId && 
-         query.companyId.startsWith('comp_') && 
-         query.companyId.length >= 10;
+  if (!query || !query.companyId) return false;
+  
+  const isValidObjectId = /^[0-9a-fA-F]{24}$/.test(query.companyId);
+  const isValidCompanyCode = query.companyId.startsWith('comp_') && query.companyId.length >= 10;
+  
+  return isValidObjectId || isValidCompanyCode;
 };
 
 // ============ TENANT CONTEXT HELPER ============
@@ -303,7 +392,9 @@ const getTenantContext = (req) => {
   return {
     companyId: req.companyId || req.tenant?.companyId || null,
     isRequired: req.tenant?.isRequired || false,
-    isIsolated: req.tenant?.isIsolated || false
+    isIsolated: req.tenant?.isIsolated || false,
+    source: req.tenantSource || 'unknown',
+    isValid: req.tenant?.isValid || false
   };
 };
 
@@ -321,7 +412,12 @@ const hasTenantContext = (req) => {
  */
 const getSafeCompanyId = (req) => {
   const companyId = req.companyId || req.tenant?.companyId || null;
-  if (companyId && companyId.startsWith('comp_') && companyId.length >= 10) {
+  if (!companyId) return null;
+  
+  const isValidObjectId = /^[0-9a-fA-F]{24}$/.test(companyId);
+  const isValidCompanyCode = companyId.startsWith('comp_') && companyId.length >= 10;
+  
+  if (isValidObjectId || isValidCompanyCode) {
     return companyId;
   }
   return null;
@@ -344,8 +440,11 @@ const buildMultiTenantQuery = (companyId, query = {}, strict = true) => {
     return query;
   }
   
-  if (!companyId.startsWith('comp_')) {
-    throw new Error('Invalid company ID format. Must start with "comp_"');
+  const isValidObjectId = /^[0-9a-fA-F]{24}$/.test(companyId);
+  const isValidCompanyCode = companyId.startsWith('comp_') && companyId.length >= 10;
+  
+  if (!isValidObjectId && !isValidCompanyCode) {
+    throw new Error('Invalid company ID format. Must be ObjectId or start with "comp_"');
   }
   
   return {
@@ -365,8 +464,11 @@ const applyTenantFilterToPipeline = (pipeline, companyId, field = 'companyId') =
     throw new Error('Company ID is required for tenant filter');
   }
   
-  if (!companyId.startsWith('comp_')) {
-    throw new Error('Invalid company ID format. Must start with "comp_"');
+  const isValidObjectId = /^[0-9a-fA-F]{24}$/.test(companyId);
+  const isValidCompanyCode = companyId.startsWith('comp_') && companyId.length >= 10;
+  
+  if (!isValidObjectId && !isValidCompanyCode) {
+    throw new Error('Invalid company ID format. Must be ObjectId or start with "comp_"');
   }
   
   // التحقق من وجود $match في بداية الـ pipeline
@@ -391,6 +493,15 @@ const applyTenantFilterToPipeline = (pipeline, companyId, field = 'companyId') =
  */
 const enforceTenantIsolation = (req, res, next) => {
   try {
+    // ✅ التحقق من وجود req
+    if (!req) {
+      logger.error('❌ Tenant isolation: req is undefined');
+      return res.status(500).json({
+        success: false,
+        message: 'Internal server error: request object missing'
+      });
+    }
+
     if (!req.companyId && req.tenant?.isRequired) {
       logger.warn('Tenant isolation violation', {
         ip: req.ip,
@@ -399,23 +510,39 @@ const enforceTenantIsolation = (req, res, next) => {
         user: req.user?.id
       });
       
-      return sendError(res, 403, 'Tenant isolation violated. Company ID is required.');
+      return res.status(403).json({
+        success: false,
+        message: 'Tenant isolation violated. Company ID is required.'
+      });
     }
     
     // التحقق من صحة companyId إذا كان موجوداً
-    if (req.companyId && !req.companyId.startsWith('comp_')) {
-      logger.warn('Invalid company ID in isolation check', {
-        companyId: req.companyId,
-        ip: req.ip,
-        path: req.path
-      });
-      return sendError(res, 400, 'Invalid company ID format');
+    if (req.companyId) {
+      const isValidObjectId = /^[0-9a-fA-F]{24}$/.test(req.companyId);
+      const isValidCompanyCode = req.companyId.startsWith('comp_') && req.companyId.length >= 10;
+      
+      if (!isValidObjectId && !isValidCompanyCode) {
+        logger.warn('Invalid company ID in isolation check', {
+          companyId: req.companyId,
+          ip: req.ip,
+          path: req.path
+        });
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid company ID format',
+          received: req.companyId
+        });
+      }
     }
     
     next();
   } catch (error) {
     logger.error('Tenant isolation middleware error', error);
-    return sendError(res, 500, 'Tenant isolation error');
+    return res.status(500).json({
+      success: false,
+      message: 'Tenant isolation error',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 };
 

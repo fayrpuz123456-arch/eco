@@ -9,29 +9,61 @@ const logger = require('../../../core/utils/logger');
 router.use(authMiddleware);
 router.use(tenantMiddleware(true));
 
+// ===== Helper function للحصول على companyId =====
+const getCompanyId = (req) => {
+  return req.body?.companyId || req.headers?.['x-company-id'] || req.companyId;
+};
+
 // ===== GET - قائمة المصانع =====
 router.get('/', async (req, res) => {
   try {
-    // ✅ استخدام companyId من الـ Body أو من الـ Auth
-    const companyId = req.body.companyId || req.companyId;
+    // ✅ استخدام companyId من الـ Body أو الـ Header أو الـ Auth
+    const companyId = getCompanyId(req);
+
+    // ✅ تسجيل للـ Debug
+    logger.debug('🔍 GET /factories - companyId:', {
+      fromBody: req.body?.companyId,
+      fromHeader: req.headers?.['x-company-id'],
+      fromAuth: req.companyId,
+      final: companyId
+    });
 
     if (!companyId) {
       return res.status(400).json({
         success: false,
-        message: 'companyId مطلوب في الـ Body أو من الـ Auth'
+        message: 'companyId مطلوب في الـ Body أو الـ Header (x-company-id) أو من الـ Auth'
       });
     }
 
-    const factories = await Factory.find({ 
-      companyId,
-      deletedAt: null 
-    }).select('-__v');
+    // ✅ دعم Pagination
+    const { page = 1, limit = 10 } = req.query;
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    const [factories, total] = await Promise.all([
+      Factory.find({ 
+        companyId,
+        deletedAt: null 
+      })
+      .skip(skip)
+      .limit(parseInt(limit))
+      .select('-__v')
+      .sort({ createdAt: -1 }),
+      Factory.countDocuments({ companyId, deletedAt: null })
+    ]);
 
     res.json({
       success: true,
       message: 'Factories retrieved successfully',
       data: factories,
-      count: factories.length
+      count: factories.length,
+      meta: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        totalPages: Math.ceil(total / parseInt(limit)),
+        hasNext: skip + factories.length < total,
+        hasPrev: parseInt(page) > 1
+      }
     });
   } catch (error) {
     logger.error('❌ GET /factories error:', error);
@@ -46,13 +78,13 @@ router.get('/', async (req, res) => {
 // ===== GET - مصنع بالمعرف =====
 router.get('/:id', async (req, res) => {
   try {
-    // ✅ استخدام companyId من الـ Body أو من الـ Auth
-    const companyId = req.body.companyId || req.companyId;
+    // ✅ استخدام companyId من الـ Body أو الـ Header أو الـ Auth
+    const companyId = getCompanyId(req);
 
     if (!companyId) {
       return res.status(400).json({
         success: false,
-        message: 'companyId مطلوب في الـ Body أو من الـ Auth'
+        message: 'companyId مطلوب في الـ Body أو الـ Header (x-company-id) أو من الـ Auth'
       });
     }
 
@@ -87,13 +119,13 @@ router.get('/:id', async (req, res) => {
 // ===== GET - مصنع بالكود =====
 router.get('/code/:code', async (req, res) => {
   try {
-    // ✅ استخدام companyId من الـ Body أو من الـ Auth
-    const companyId = req.body.companyId || req.companyId;
+    // ✅ استخدام companyId من الـ Body أو الـ Header أو الـ Auth
+    const companyId = getCompanyId(req);
 
     if (!companyId) {
       return res.status(400).json({
         success: false,
-        message: 'companyId مطلوب في الـ Body أو من الـ Auth'
+        message: 'companyId مطلوب في الـ Body أو الـ Header (x-company-id) أو من الـ Auth'
       });
     }
 
@@ -129,9 +161,9 @@ router.get('/code/:code', async (req, res) => {
 // ===== POST - إنشاء مصنع جديد =====
 router.post('/', async (req, res) => {
   try {
-    // ✅ استخدام companyId من الـ Body أو من الـ Auth
-    const companyId = req.body.companyId || req.companyId;
-    const userId = req.user.id;
+    // ✅ استخدام companyId من الـ Body أو الـ Header أو الـ Auth
+    const companyId = getCompanyId(req);
+    const userId = req.user?.id;
 
     if (!companyId || !userId) {
       return res.status(401).json({
@@ -140,11 +172,15 @@ router.post('/', async (req, res) => {
       });
     }
 
-    // ✅ التحقق من صحة companyId
-    if (!companyId.startsWith('comp_')) {
+    // ✅ التحقق من صحة companyId (يدعم ObjectId و comp_)
+    const isValidObjectId = /^[0-9a-fA-F]{24}$/.test(companyId);
+    const isValidCompanyCode = companyId.startsWith('comp_') && companyId.length >= 10;
+    
+    if (!isValidObjectId && !isValidCompanyCode) {
       return res.status(400).json({
         success: false,
-        message: 'Invalid company ID format. Must start with "comp_"'
+        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
+        received: companyId
       });
     }
 
@@ -168,7 +204,7 @@ router.post('/', async (req, res) => {
     if (existingFactory) {
       return res.status(409).json({
         success: false,
-        message: 'Factory with this code already exists in this company'
+        message: `Factory with code "${code}" already exists in this company`
       });
     }
 
@@ -205,6 +241,13 @@ router.post('/', async (req, res) => {
       });
     }
 
+    if (error.code === 11000) {
+      return res.status(409).json({
+        success: false,
+        message: 'Factory with this code already exists'
+      });
+    }
+
     res.status(500).json({
       success: false,
       message: 'Error creating factory',
@@ -216,9 +259,9 @@ router.post('/', async (req, res) => {
 // ===== PUT - تحديث مصنع =====
 router.put('/:id', async (req, res) => {
   try {
-    // ✅ استخدام companyId من الـ Body أو من الـ Auth
-    const companyId = req.body.companyId || req.companyId;
-    const userId = req.user.id;
+    // ✅ استخدام companyId من الـ Body أو الـ Header أو الـ Auth
+    const companyId = getCompanyId(req);
+    const userId = req.user?.id;
 
     if (!companyId || !userId) {
       return res.status(401).json({
@@ -277,9 +320,9 @@ router.put('/:id', async (req, res) => {
 // ===== DELETE - حذف مصنع (Soft Delete) =====
 router.delete('/:id', async (req, res) => {
   try {
-    // ✅ استخدام companyId من الـ Body أو من الـ Auth
-    const companyId = req.body.companyId || req.companyId;
-    const userId = req.user.id;
+    // ✅ استخدام companyId من الـ Body أو الـ Header أو الـ Auth
+    const companyId = getCompanyId(req);
+    const userId = req.user?.id;
 
     if (!companyId || !userId) {
       return res.status(401).json({
@@ -330,32 +373,22 @@ router.delete('/:id', async (req, res) => {
 // ===== GET - إحصائيات المصانع =====
 router.get('/stats', async (req, res) => {
   try {
-    // ✅ استخدام companyId من الـ Body أو من الـ Auth
-    const companyId = req.body.companyId || req.companyId;
+    // ✅ استخدام companyId من الـ Body أو الـ Header أو الـ Auth
+    const companyId = getCompanyId(req);
 
     if (!companyId) {
       return res.status(400).json({
         success: false,
-        message: 'companyId مطلوب في الـ Body أو من الـ Auth'
+        message: 'companyId مطلوب في الـ Body أو الـ Header (x-company-id) أو من الـ Auth'
       });
     }
 
-    const total = await Factory.countDocuments({ companyId, deletedAt: null });
-    const active = await Factory.countDocuments({ 
-      companyId,
-      status: 'active', 
-      deletedAt: null 
-    });
-    const inactive = await Factory.countDocuments({ 
-      companyId,
-      status: 'inactive', 
-      deletedAt: null 
-    });
-    const archived = await Factory.countDocuments({ 
-      companyId,
-      status: 'archived', 
-      deletedAt: null 
-    });
+    const [total, active, inactive, archived] = await Promise.all([
+      Factory.countDocuments({ companyId, deletedAt: null }),
+      Factory.countDocuments({ companyId, status: 'active', deletedAt: null }),
+      Factory.countDocuments({ companyId, status: 'inactive', deletedAt: null }),
+      Factory.countDocuments({ companyId, status: 'archived', deletedAt: null })
+    ]);
 
     res.json({
       success: true,
