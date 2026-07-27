@@ -22,14 +22,27 @@ class SensorService extends BaseService {
     try {
       this.validateRequiredFields(data, ['name', 'code', 'type', 'category', 'unit', 'machineId', 'factoryId', 'departmentId', 'productionLineId']);
 
+      // ✅ استخدام companyId من الـ Body لو موجود، وإلا استخدم الـ companyId من الـ Request
+      const finalCompanyId = data.companyId || companyId;
+
+      // ✅ التحقق من وجود companyId
+      if (!finalCompanyId) {
+        throw new ValidationError('Company ID is required');
+      }
+
+      // ✅ التحقق من صحة companyId
+      if (!finalCompanyId.startsWith('comp_')) {
+        throw new ValidationError('Invalid company ID format. Must start with "comp_"');
+      }
+
       // التحقق من عدم وجود حساس بنفس الاسم في الآلة
-      const existingName = await this.repository.findByName(data.name, data.machineId, companyId);
+      const existingName = await this.repository.findByName(data.name, data.machineId, finalCompanyId);
       if (existingName) {
         throw new ConflictError('Sensor with this name already exists on this machine');
       }
 
       // التحقق من عدم وجود حساس بنفس الكود في الآلة
-      const existingCode = await this.repository.findByCode(data.code, data.machineId, companyId);
+      const existingCode = await this.repository.findByCode(data.code, data.machineId, finalCompanyId);
       if (existingCode) {
         throw new ConflictError('Sensor with this code already exists on this machine');
       }
@@ -37,9 +50,9 @@ class SensorService extends BaseService {
       const sensorData = {
         ...data,
         code: data.code.toUpperCase(),
+        companyId: finalCompanyId,  // ✅ استخدم finalCompanyId
         createdBy: userId,
-        updatedBy: userId,
-        companyId
+        updatedBy: userId
       };
 
       const sensor = await this.repository.create(sensorData);
@@ -48,7 +61,7 @@ class SensorService extends BaseService {
         sensorId: sensor._id,
         name: sensor.name,
         machineId: sensor.machineId,
-        companyId,
+        companyId: finalCompanyId,
         createdBy: userId
       });
 
@@ -56,7 +69,7 @@ class SensorService extends BaseService {
         sensorId: sensor._id,
         name: sensor.name,
         machineId: sensor.machineId,
-        companyId
+        companyId: finalCompanyId
       });
 
       return sensor;

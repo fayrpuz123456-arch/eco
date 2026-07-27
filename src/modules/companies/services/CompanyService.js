@@ -18,7 +18,25 @@ const { PERMISSIONS, hasPermission } = require('../../../core/middleware/permiss
 class CompanyService extends BaseService {
   constructor() {
     super(new CompanyRepository(), 'Company');
-    this.repository = this.repository; // Type cast
+    this.repository = this.repository;
+  }
+
+  // ============ HELPER METHODS ============
+
+  /**
+   * توليد معرف شركة فريد
+   */
+  generateCompanyId() {
+    const timestamp = Date.now();
+    const random = Math.random().toString(36).substring(2, 8);
+    return `comp_${timestamp}_${random}`;
+  }
+
+  /**
+   * التحقق من صحة معرف الشركة
+   */
+  isValidCompanyId(companyId) {
+    return companyId && companyId.startsWith('comp_') && companyId.length > 5;
   }
 
   // ============ CREATE ============
@@ -30,11 +48,6 @@ class CompanyService extends BaseService {
     try {
       // 1. التحقق من الحقول المطلوبة
       this.validateRequiredFields(data, ['name', 'code', 'industry', 'contactEmail']);
-
-      // ✅ التأكد من وجود companyId (للتسلسل الهرمي)
-      if (!data.companyId) {
-        data.companyId = `comp_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
-      }
 
       // 2. التحقق من عدم وجود شركة بنفس الاسم
       const existingName = await this.repository.findByName(data.name);
@@ -48,17 +61,27 @@ class CompanyService extends BaseService {
         throw new ConflictError('Company with this code already exists');
       }
 
-      // 4. تحضير بيانات الشركة
+      // 4. توليد companyId فريد (بدون الاعتماد على الـ Request)
+      const companyId = this.generateCompanyId();
+
+      // 5. تحضير بيانات الشركة
       const companyData = {
         ...data,
-        code: data.code.toUpperCase(),
+        code: data.code.toUpperCase().trim(),
+        companyId: companyId,
         createdBy: userId,
         updatedBy: userId,
         status: 'active',
         verified: false
       };
 
-      // 5. إضافة إعدادات افتراضية
+      // 6. تنظيف البيانات النصية
+      if (companyData.name) companyData.name = companyData.name.trim();
+      if (companyData.contactEmail) companyData.contactEmail = companyData.contactEmail.toLowerCase().trim();
+      if (companyData.description) companyData.description = companyData.description.trim();
+      if (companyData.website) companyData.website = companyData.website.trim();
+
+      // 7. إضافة إعدادات افتراضية
       if (!companyData.settings) {
         companyData.settings = {
           defaultLanguage: 'en',
@@ -98,7 +121,7 @@ class CompanyService extends BaseService {
         };
       }
 
-      // 6. إضافة اشتراك افتراضي
+      // 8. إضافة اشتراك افتراضي
       if (!companyData.subscription) {
         companyData.subscription = {
           plan: 'free',
@@ -126,10 +149,10 @@ class CompanyService extends BaseService {
         };
       }
 
-      // 7. إنشاء الشركة
+      // 9. إنشاء الشركة
       const company = await this.repository.create(companyData);
 
-      // 8. إرسال حدث
+      // 10. إرسال حدث
       eventEmitter.emit(EventTypes.COMPANY_CREATED, {
         companyId: company._id,
         name: company.name,
@@ -137,7 +160,7 @@ class CompanyService extends BaseService {
         createdBy: userId
       });
 
-      // 9. تسجيل العملية
+      // 11. تسجيل العملية
       logger.info('Company created successfully', {
         companyId: company._id,
         name: company.name,
@@ -225,6 +248,10 @@ class CompanyService extends BaseService {
    * الحصول على شركة بالكود
    */
   async getCompanyByCode(code) {
+    if (!code) {
+      throw new ValidationError('Company code is required');
+    }
+    
     const company = await this.repository.findByCode(code);
     if (!company) {
       throw new NotFoundError('Company not found');
@@ -236,6 +263,10 @@ class CompanyService extends BaseService {
    * الحصول على شركة بالاسم
    */
   async getCompanyByName(name) {
+    if (!name) {
+      throw new ValidationError('Company name is required');
+    }
+    
     const company = await this.repository.findByName(name);
     if (!company) {
       throw new NotFoundError('Company not found');
@@ -279,6 +310,9 @@ class CompanyService extends BaseService {
    * الحصول على شركات حسب الصناعة
    */
   async getCompaniesByIndustry(industry) {
+    if (!industry) {
+      throw new ValidationError('Industry is required');
+    }
     return this.repository.findByIndustry(industry);
   }
 
@@ -286,6 +320,9 @@ class CompanyService extends BaseService {
    * الحصول على شركات حسب البلد
    */
   async getCompaniesByCountry(country) {
+    if (!country) {
+      throw new ValidationError('Country is required');
+    }
     return this.repository.findByCountry(country);
   }
 
@@ -310,6 +347,9 @@ class CompanyService extends BaseService {
    * الحصول على شركات ذات ESG عالية
    */
   async getHighESGCompanies(minScore = 70) {
+    if (minScore < 0 || minScore > 100) {
+      throw new ValidationError('Min score must be between 0 and 100');
+    }
     return this.repository.findHighESGCompanies(minScore);
   }
 
@@ -317,6 +357,9 @@ class CompanyService extends BaseService {
    * الحصول على شركات تستخدم إضافة معينة
    */
   async getCompaniesByPlugin(pluginName) {
+    if (!pluginName) {
+      throw new ValidationError('Plugin name is required');
+    }
     return this.repository.findByPlugin(pluginName);
   }
 
@@ -350,42 +393,52 @@ class CompanyService extends BaseService {
       const updateData = {};
       for (const key of allowedUpdates) {
         if (data[key] !== undefined) {
-          updateData[key] = data[key];
+          // تنظيف البيانات النصية
+          if (typeof data[key] === 'string' && ['name', 'description', 'website', 'contactEmail', 'contactPhone'].includes(key)) {
+            updateData[key] = data[key].trim();
+          } else {
+            updateData[key] = data[key];
+          }
         }
       }
 
       // 4. التحقق من عدم وجود اسم مكرر
-      if (data.name && data.name !== existingCompany.name) {
-        const nameExists = await this.repository.findByName(data.name);
+      if (data.name && data.name.trim() !== existingCompany.name) {
+        const nameExists = await this.repository.findByName(data.name.trim());
         if (nameExists && nameExists._id !== id) {
           throw new ConflictError('Company with this name already exists');
         }
-        updateData.name = data.name;
+        updateData.name = data.name.trim();
       }
 
       // 5. التحقق من عدم وجود كود مكرر
-      if (data.code && data.code.toUpperCase() !== existingCompany.code) {
+      if (data.code && data.code.toUpperCase().trim() !== existingCompany.code) {
         const codeExists = await this.repository.findByCode(data.code);
         if (codeExists && codeExists._id !== id) {
           throw new ConflictError('Company with this code already exists');
         }
-        updateData.code = data.code.toUpperCase();
+        updateData.code = data.code.toUpperCase().trim();
       }
 
-      // 6. إضافة المستخدم الحالي كمحرر
+      // 6. تنظيف البريد الإلكتروني
+      if (data.contactEmail) {
+        updateData.contactEmail = data.contactEmail.toLowerCase().trim();
+      }
+
+      // 7. إضافة المستخدم الحالي كمحرر
       updateData.updatedBy = userId;
 
-      // 7. تحديث الشركة
+      // 8. تحديث الشركة
       const updatedCompany = await this.repository.update(id, updateData);
 
-      // 8. إرسال حدث
+      // 9. إرسال حدث
       eventEmitter.emit(EventTypes.COMPANY_UPDATED, {
         companyId: updatedCompany._id,
         name: updatedCompany.name,
         updatedBy: userId
       });
 
-      // 9. تسجيل العملية
+      // 10. تسجيل العملية
       logger.info('Company updated successfully', {
         companyId: updatedCompany._id,
         name: updatedCompany.name,
@@ -412,6 +465,12 @@ class CompanyService extends BaseService {
       // التحقق من الصلاحيات
       if (!this.canManageCompany(userId, company)) {
         throw new ForbiddenError('You do not have permission to update this company\'s subscription');
+      }
+
+      // التحقق من صحة الخطة
+      const validPlans = ['free', 'basic', 'professional', 'enterprise', 'custom'];
+      if (!validPlans.includes(plan)) {
+        throw new ValidationError(`Invalid plan. Must be one of: ${validPlans.join(', ')}`);
       }
 
       // تحديث الاشتراك
@@ -447,8 +506,13 @@ class CompanyService extends BaseService {
         throw new ForbiddenError('You do not have permission to extend this company\'s subscription');
       }
 
+      // التحقق من صحة التاريخ
+      if (!endDate || new Date(endDate) < new Date()) {
+        throw new ValidationError('End date must be in the future');
+      }
+
       // تمديد الاشتراك
-      const updatedCompany = await this.repository.extendSubscription(id, endDate);
+      const updatedCompany = await this.repository.extendSubscription(id, new Date(endDate));
 
       logger.info('Company subscription extended', {
         companyId: id,
@@ -478,11 +542,18 @@ class CompanyService extends BaseService {
         throw new ForbiddenError('You do not have permission to update this company\'s ESG data');
       }
 
+      // التحقق من صحة البيانات
+      if (esgData.sustainabilityScore !== undefined) {
+        if (esgData.sustainabilityScore < 0 || esgData.sustainabilityScore > 100) {
+          throw new ValidationError('Sustainability score must be between 0 and 100');
+        }
+      }
+
       // تحديث ESG
       const updatedCompany = await this.repository.updateESGData(id, esgData);
 
       // إرسال حدث
-      eventEmitter.emit('company.esg.updated', {
+      eventEmitter.emit(EventTypes.COMPANY_ESG_UPDATED, {
         companyId: id,
         esg: esgData,
         updatedBy: userId
@@ -517,6 +588,11 @@ class CompanyService extends BaseService {
         throw new ForbiddenError('You do not have permission to verify this company');
       }
 
+      // التحقق من أن الشركة غير مفعلة بالفعل
+      if (company.verified) {
+        throw new ConflictError('Company is already verified');
+      }
+
       const updatedCompany = await this.repository.verifyCompany(id, userId);
 
       logger.info('Company verified', {
@@ -547,6 +623,11 @@ class CompanyService extends BaseService {
         throw new ForbiddenError('You do not have permission to unverify this company');
       }
 
+      // التحقق من أن الشركة مفعلة
+      if (!company.verified) {
+        throw new ConflictError('Company is not verified');
+      }
+
       const updatedCompany = await this.repository.unverifyCompany(id);
 
       logger.info('Company unverified', {
@@ -575,6 +656,12 @@ class CompanyService extends BaseService {
       // التحقق من الصلاحيات
       if (!this.canManageCompany(userId, company)) {
         throw new ForbiddenError('You do not have permission to update this company\'s status');
+      }
+
+      // التحقق من صحة الحالة
+      const validStatuses = ['active', 'inactive', 'suspended', 'archived'];
+      if (!validStatuses.includes(status)) {
+        throw new ValidationError(`Invalid status. Must be one of: ${validStatuses.join(', ')}`);
       }
 
       const updatedCompany = await this.repository.updateStatus(id, status);
@@ -816,6 +903,9 @@ class CompanyService extends BaseService {
    * الحصول على أفضل الشركات حسب ESG
    */
   async getTopESGCompanies(limit = 10) {
+    if (limit < 1 || limit > 100) {
+      throw new ValidationError('Limit must be between 1 and 100');
+    }
     return this.repository.getTopESGCompanies(limit);
   }
 
@@ -841,6 +931,10 @@ class CompanyService extends BaseService {
    * تصدير الشركات
    */
   async exportCompanies(format = 'json', filters = {}) {
+    const validFormats = ['json', 'csv'];
+    if (!validFormats.includes(format)) {
+      throw new ValidationError(`Invalid format. Must be one of: ${validFormats.join(', ')}`);
+    }
     return this.repository.exportCompanies(format, filters);
   }
 
@@ -850,7 +944,7 @@ class CompanyService extends BaseService {
    * التحقق من صلاحية إدارة شركة
    */
   canManageCompany(userId, company) {
-    // TODO: التحقق من صلاحيات المستخدم
+    // TODO: التحقق من صلاحيات المستخدم من قاعدة البيانات
     // هنا نفترض أن المستخدم لديه صلاحيات كافية
     // يمكن إضافة منطق أكثر تعقيداً هنا
     return true;
@@ -940,7 +1034,9 @@ class CompanyService extends BaseService {
    */
   async refreshCompanyStatistics(companyId) {
     try {
-      if (!companyId) return null;
+      if (!companyId) {
+        throw new ValidationError('Company ID is required');
+      }
 
       const Factory = require('../../factories/models/Factory.model');
       const Department = require('../../departments/models/Department.model');

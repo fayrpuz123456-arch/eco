@@ -1,11 +1,32 @@
 const express = require('express');
 const router = express.Router();
 const Factory = require('../models/Factory.model');
+const { authMiddleware } = require('../../../core/middleware/auth');
+const { tenantMiddleware } = require('../../../core/middleware/tenant');
+const logger = require('../../../core/utils/logger');
+
+// ✅ تطبيق الـ Middleware
+router.use(authMiddleware);
+router.use(tenantMiddleware(true));
 
 // ===== GET - قائمة المصانع =====
 router.get('/', async (req, res) => {
   try {
-    const factories = await Factory.find({ deletedAt: null }).select('-__v');
+    // ✅ استخدام companyId من الـ Body أو من الـ Auth
+    const companyId = req.body.companyId || req.companyId;
+
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'companyId مطلوب في الـ Body أو من الـ Auth'
+      });
+    }
+
+    const factories = await Factory.find({ 
+      companyId,
+      deletedAt: null 
+    }).select('-__v');
+
     res.json({
       success: true,
       message: 'Factories retrieved successfully',
@@ -13,10 +34,11 @@ router.get('/', async (req, res) => {
       count: factories.length
     });
   } catch (error) {
+    logger.error('❌ GET /factories error:', error);
     res.status(500).json({
       success: false,
       message: 'Error fetching factories',
-      error: error.message
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
 });
@@ -24,23 +46,40 @@ router.get('/', async (req, res) => {
 // ===== GET - مصنع بالمعرف =====
 router.get('/:id', async (req, res) => {
   try {
-    const factory = await Factory.findById(req.params.id);
+    // ✅ استخدام companyId من الـ Body أو من الـ Auth
+    const companyId = req.body.companyId || req.companyId;
+
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'companyId مطلوب في الـ Body أو من الـ Auth'
+      });
+    }
+
+    const factory = await Factory.findOne({
+      _id: req.params.id,
+      companyId,
+      deletedAt: null
+    });
+
     if (!factory) {
       return res.status(404).json({
         success: false,
         message: 'Factory not found'
       });
     }
+
     res.json({
       success: true,
       message: 'Factory retrieved successfully',
       data: factory
     });
   } catch (error) {
+    logger.error('❌ GET /factories/:id error:', error);
     res.status(500).json({
       success: false,
       message: 'Error fetching factory',
-      error: error.message
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
 });
@@ -48,24 +87,41 @@ router.get('/:id', async (req, res) => {
 // ===== GET - مصنع بالكود =====
 router.get('/code/:code', async (req, res) => {
   try {
+    // ✅ استخدام companyId من الـ Body أو من الـ Auth
+    const companyId = req.body.companyId || req.companyId;
+
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'companyId مطلوب في الـ Body أو من الـ Auth'
+      });
+    }
+
     const code = req.params.code.toUpperCase();
-    const factory = await Factory.findOne({ code, deletedAt: null });
+    const factory = await Factory.findOne({ 
+      code, 
+      companyId,
+      deletedAt: null 
+    });
+
     if (!factory) {
       return res.status(404).json({
         success: false,
         message: 'Factory not found'
       });
     }
+
     res.json({
       success: true,
       message: 'Factory retrieved successfully',
       data: factory
     });
   } catch (error) {
+    logger.error('❌ GET /factories/code/:code error:', error);
     res.status(500).json({
       success: false,
       message: 'Error fetching factory',
-      error: error.message
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
 });
@@ -73,18 +129,42 @@ router.get('/code/:code', async (req, res) => {
 // ===== POST - إنشاء مصنع جديد =====
 router.post('/', async (req, res) => {
   try {
-    const { name, code, industry, contactEmail, companyId, contactPhone, address } = req.body;
+    // ✅ استخدام companyId من الـ Body أو من الـ Auth
+    const companyId = req.body.companyId || req.companyId;
+    const userId = req.user.id;
 
-    // التحقق من البيانات المطلوبة
-    if (!name || !code || !industry || !contactEmail || !companyId) {
+    if (!companyId || !userId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Unauthorized: user/company context missing from request'
+      });
+    }
+
+    // ✅ التحقق من صحة companyId
+    if (!companyId.startsWith('comp_')) {
       return res.status(400).json({
         success: false,
-        message: 'Name, code, industry, contactEmail, and companyId are required'
+        message: 'Invalid company ID format. Must start with "comp_"'
+      });
+    }
+
+    const { name, code, industry, contactEmail, contactPhone, address } = req.body;
+
+    // التحقق من البيانات المطلوبة
+    if (!name || !code || !industry || !contactEmail) {
+      return res.status(400).json({
+        success: false,
+        message: 'Name, code, industry, and contactEmail are required'
       });
     }
 
     // التحقق من عدم وجود مصنع بنفس الكود في نفس الشركة
-    const existingFactory = await Factory.findOne({ code: code.toUpperCase(), companyId });
+    const existingFactory = await Factory.findOne({ 
+      code: code.toUpperCase(), 
+      companyId,
+      deletedAt: null 
+    });
+
     if (existingFactory) {
       return res.status(409).json({
         success: false,
@@ -94,13 +174,15 @@ router.post('/', async (req, res) => {
 
     // إنشاء مصنع جديد
     const newFactory = new Factory({
-      name,
-      code: code.toUpperCase(),
+      name: name.trim(),
+      code: code.toUpperCase().trim(),
       industry,
-      contactEmail,
-      companyId,
+      contactEmail: contactEmail.trim(),
+      companyId, // ✅ استخدام companyId الصحيح
       contactPhone: contactPhone || null,
       address: address || {},
+      createdBy: userId,
+      updatedBy: userId,
       status: 'active'
     });
 
@@ -112,11 +194,21 @@ router.post('/', async (req, res) => {
       data: savedFactory
     });
   } catch (error) {
-    console.error('❌ Error creating factory:', error);
+    logger.error('❌ Error creating factory:', error);
+    
+    if (error.name === 'ValidationError') {
+      const errors = Object.values(error.errors).map(err => err.message);
+      return res.status(400).json({
+        success: false,
+        message: 'Validation error',
+        errors: errors
+      });
+    }
+
     res.status(500).json({
       success: false,
       message: 'Error creating factory',
-      error: error.message
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
 });
@@ -124,8 +216,22 @@ router.post('/', async (req, res) => {
 // ===== PUT - تحديث مصنع =====
 router.put('/:id', async (req, res) => {
   try {
-    const { name, industry, contactEmail, contactPhone, address, status } = req.body;
-    const factory = await Factory.findById(req.params.id);
+    // ✅ استخدام companyId من الـ Body أو من الـ Auth
+    const companyId = req.body.companyId || req.companyId;
+    const userId = req.user.id;
+
+    if (!companyId || !userId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Unauthorized: user/company context missing from request'
+      });
+    }
+
+    const factory = await Factory.findOne({
+      _id: req.params.id,
+      companyId,
+      deletedAt: null
+    });
     
     if (!factory) {
       return res.status(404).json({
@@ -134,15 +240,23 @@ router.put('/:id', async (req, res) => {
       });
     }
 
+    // منع تحديث companyId و code
+    delete req.body.companyId;
+    delete req.body.code;
+
+    const { name, industry, contactEmail, contactPhone, address, status } = req.body;
+
     // تحديث الحقول
-    if (name) factory.name = name;
+    if (name) factory.name = name.trim();
     if (industry) factory.industry = industry;
-    if (contactEmail) factory.contactEmail = contactEmail;
+    if (contactEmail) factory.contactEmail = contactEmail.trim();
     if (contactPhone) factory.contactPhone = contactPhone;
     if (address) factory.address = address;
     if (status) factory.status = status;
 
+    factory.updatedBy = userId;
     factory.updatedAt = new Date();
+
     const updatedFactory = await factory.save();
 
     res.json({
@@ -151,11 +265,11 @@ router.put('/:id', async (req, res) => {
       data: updatedFactory
     });
   } catch (error) {
-    console.error('❌ Error updating factory:', error);
+    logger.error('❌ Error updating factory:', error);
     res.status(500).json({
       success: false,
       message: 'Error updating factory',
-      error: error.message
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
 });
@@ -163,7 +277,23 @@ router.put('/:id', async (req, res) => {
 // ===== DELETE - حذف مصنع (Soft Delete) =====
 router.delete('/:id', async (req, res) => {
   try {
-    const factory = await Factory.findById(req.params.id);
+    // ✅ استخدام companyId من الـ Body أو من الـ Auth
+    const companyId = req.body.companyId || req.companyId;
+    const userId = req.user.id;
+
+    if (!companyId || !userId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Unauthorized: user/company context missing from request'
+      });
+    }
+
+    const factory = await Factory.findOne({
+      _id: req.params.id,
+      companyId,
+      deletedAt: null
+    });
+
     if (!factory) {
       return res.status(404).json({
         success: false,
@@ -173,6 +303,7 @@ router.delete('/:id', async (req, res) => {
 
     // Soft Delete
     factory.deletedAt = new Date();
+    factory.deletedBy = userId;
     factory.status = 'archived';
     await factory.save();
 
@@ -187,11 +318,11 @@ router.delete('/:id', async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('❌ Error deleting factory:', error);
+    logger.error('❌ Error deleting factory:', error);
     res.status(500).json({
       success: false,
       message: 'Error deleting factory',
-      error: error.message
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
 });
@@ -199,10 +330,32 @@ router.delete('/:id', async (req, res) => {
 // ===== GET - إحصائيات المصانع =====
 router.get('/stats', async (req, res) => {
   try {
-    const total = await Factory.countDocuments({ deletedAt: null });
-    const active = await Factory.countDocuments({ status: 'active', deletedAt: null });
-    const inactive = await Factory.countDocuments({ status: 'inactive', deletedAt: null });
-    const archived = await Factory.countDocuments({ status: 'archived', deletedAt: null });
+    // ✅ استخدام companyId من الـ Body أو من الـ Auth
+    const companyId = req.body.companyId || req.companyId;
+
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'companyId مطلوب في الـ Body أو من الـ Auth'
+      });
+    }
+
+    const total = await Factory.countDocuments({ companyId, deletedAt: null });
+    const active = await Factory.countDocuments({ 
+      companyId,
+      status: 'active', 
+      deletedAt: null 
+    });
+    const inactive = await Factory.countDocuments({ 
+      companyId,
+      status: 'inactive', 
+      deletedAt: null 
+    });
+    const archived = await Factory.countDocuments({ 
+      companyId,
+      status: 'archived', 
+      deletedAt: null 
+    });
 
     res.json({
       success: true,
@@ -215,10 +368,11 @@ router.get('/stats', async (req, res) => {
       }
     });
   } catch (error) {
+    logger.error('❌ GET /factories/stats error:', error);
     res.status(500).json({
       success: false,
       message: 'Error fetching stats',
-      error: error.message
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
 });

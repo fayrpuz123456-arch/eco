@@ -8,6 +8,7 @@ class BaseModel {
   static getSchema() {
     return {
       _id: { type: String, default: () => uuidv4() },
+      // ✅ companyId مطلوب ولكن بدون default - يتم تمريره من الـ Service
       companyId: { type: String, required: true, index: true },
       createdBy: { type: String },
       updatedBy: { type: String },
@@ -115,8 +116,6 @@ class BaseModel {
 
   static applyCommonSettings(schema) {
     // Pre-save middleware
-    // ✅ لا نستخدم next() اليدوي هنا؛ في نسخ Mongoose الحديثة الـ hooks بدون
-    // باراميتر next تُعامل كـ sync/async تلقائيًا، وأي throw بيتحول لـ rejection صح.
     schema.pre('save', function() {
       this.updatedAt = new Date();
     });
@@ -152,12 +151,14 @@ class BaseModel {
       this.set({ updatedAt: new Date() });
     });
 
-    // ✅ Post-save - Success
+    // Post-save - Success (إخفاء في production)
     schema.post('save', function(doc) {
-      console.log(`✅ ${doc.constructor.modelName} saved successfully:`, doc._id);
+      if (process.env.NODE_ENV !== 'production') {
+        console.log(`✅ ${doc.constructor.modelName} saved successfully:`, doc._id);
+      }
     });
 
-    // ✅ Post-save - Error Handler (error-handling middleware لازم تفضل بنفس الشكل: (error, doc, next))
+    // Post-save - Error Handler
     schema.post('save', function(error, doc, next) {
       if (error) {
         console.error(`❌ Error saving ${doc.constructor.modelName}:`, error.message);
@@ -166,14 +167,14 @@ class BaseModel {
       next();
     });
 
-    // ✅ Post-findOneAndUpdate - Success
+    // Post-findOneAndUpdate - Success (إخفاء في production)
     schema.post('findOneAndUpdate', function(doc) {
-      if (doc) {
+      if (doc && process.env.NODE_ENV !== 'production') {
         console.log(`✅ ${doc.constructor.modelName} updated successfully:`, doc._id);
       }
     });
 
-    // ✅ Post-findOneAndUpdate - Error Handler
+    // Post-findOneAndUpdate - Error Handler
     schema.post('findOneAndUpdate', function(error, doc, next) {
       if (error) {
         console.error(`❌ Error updating ${doc.constructor.modelName}:`, error.message);

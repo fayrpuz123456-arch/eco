@@ -29,7 +29,15 @@ class BaseController {
    */
   async create(req, res) {
     try {
-      const { user, companyId } = req;
+      const { user } = req;
+      // ✅ استخدم companyId من الـ Body لو موجود
+      const companyId = req.body.companyId || req.companyId;
+      
+      // ✅ التحقق من وجود companyId
+      if (!companyId) {
+        return sendError(res, 400, 'Company ID is required');
+      }
+      
       const result = await this.service.create(req.body, user?.id, companyId);
       return sendCreated(res, `${this.moduleName} created successfully`, result);
     } catch (error) {
@@ -152,7 +160,6 @@ class BaseController {
         return sendError(res, 400, error.message);
       
       default:
-        // لا نعرض تفاصيل الخطأ في بيئة الإنتاج
         if (process.env.NODE_ENV === 'production' && statusCode === 500) {
           return sendServerError(res, 'Internal server error');
         }
@@ -162,9 +169,6 @@ class BaseController {
 
   // ============ RESPONSE HELPERS ============
 
-  /**
-   * إرسال رد نجاح
-   */
   sendSuccess(res, data, message = null) {
     return sendResponse(
       res,
@@ -174,9 +178,6 @@ class BaseController {
     );
   }
 
-  /**
-   * إرسال رد إنشاء
-   */
   sendCreated(res, data, message = null) {
     return sendCreated(
       res,
@@ -185,9 +186,6 @@ class BaseController {
     );
   }
 
-  /**
-   * إرسال رد حذف
-   */
   sendDeleted(res, message = null) {
     return sendDeleted(
       res,
@@ -195,9 +193,6 @@ class BaseController {
     );
   }
 
-  /**
-   * إرسال رد Paginated
-   */
   sendPaginated(res, data, meta, message = null) {
     return sendPaginatedResponse(
       res,
@@ -207,12 +202,9 @@ class BaseController {
     );
   }
 
-  /**
-   * إرسال رد خطأ
-   */
   sendError(res, statusCode, message, errors = null) {
     return sendError(res, statusCode, message, errors);
   }
 }
 
-module.exports = BaseController; 
+module.exports = BaseController;

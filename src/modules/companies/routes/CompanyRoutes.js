@@ -4,9 +4,9 @@ const Company = require('../models/Company.model');
 const { authMiddleware } = require('../../../core/middleware/auth');
 const { tenantMiddleware } = require('../../../core/middleware/tenant');
 const { checkPermissions, PERMISSIONS } = require('../../../core/middleware/permissions');
+const logger = require('../../../core/utils/logger');
 
 // ============ MIDDLEWARE ============
-// تطبيق المصادقة على جميع Routes
 router.use(authMiddleware);
 router.use(tenantMiddleware(true));
 
@@ -58,7 +58,7 @@ async function getCompanyWithStats(companyId) {
       lastUpdated: new Date()
     };
   } catch (error) {
-    console.error('Error calculating company stats:', error);
+    logger.error('Error calculating company stats:', error);
     return {
       totalFactories: 0,
       totalDepartments: 0,
@@ -81,7 +81,6 @@ async function enrichCompanyWithStats(company) {
   
   const stats = await getCompanyWithStats(company._id);
   
-  // تحويل إلى Object عشان نقدر نعدله
   const companyObj = company.toObject ? company.toObject() : company;
   
   return {
@@ -91,6 +90,15 @@ async function enrichCompanyWithStats(company) {
       ...stats
     }
   };
+}
+
+/**
+ * توليد companyId فريد
+ */
+function generateCompanyId() {
+  const timestamp = Date.now();
+  const random = Math.random().toString(36).substring(2, 8);
+  return `comp_${timestamp}_${random}`;
 }
 
 // ============ ROUTES ============
@@ -110,7 +118,6 @@ router.get('/', checkPermissions([PERMISSIONS.COMPANIES_VIEW]), async (req, res)
       Company.countDocuments({ deletedAt: null })
     ]);
 
-    // إضافة الإحصائيات لكل شركة
     const enrichedCompanies = await Promise.all(
       companies.map(company => enrichCompanyWithStats(company))
     );
@@ -127,11 +134,11 @@ router.get('/', checkPermissions([PERMISSIONS.COMPANIES_VIEW]), async (req, res)
       }
     });
   } catch (error) {
-    console.error('❌ GET /companies error:', error);
+    logger.error('GET /companies error:', error);
     res.status(500).json({
       success: false,
       message: 'Error fetching companies',
-      error: error.message
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
 });
@@ -155,11 +162,11 @@ router.get('/:id', checkPermissions([PERMISSIONS.COMPANIES_VIEW]), async (req, r
       data: enrichedCompany
     });
   } catch (error) {
-    console.error('❌ GET /companies/:id error:', error);
+    logger.error('GET /companies/:id error:', error);
     res.status(500).json({
       success: false,
       message: 'Error fetching company',
-      error: error.message
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
 });
@@ -184,11 +191,11 @@ router.get('/code/:code', checkPermissions([PERMISSIONS.COMPANIES_VIEW]), async 
       data: enrichedCompany
     });
   } catch (error) {
-    console.error('❌ GET /companies/code/:code error:', error);
+    logger.error('GET /companies/code/:code error:', error);
     res.status(500).json({
       success: false,
       message: 'Error fetching company',
-      error: error.message
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
 });
@@ -201,7 +208,6 @@ router.get('/active', checkPermissions([PERMISSIONS.COMPANIES_VIEW]), async (req
       deletedAt: null 
     }).select('-__v');
 
-    // إضافة الإحصائيات لكل شركة
     const enrichedCompanies = await Promise.all(
       companies.map(company => enrichCompanyWithStats(company))
     );
@@ -213,11 +219,11 @@ router.get('/active', checkPermissions([PERMISSIONS.COMPANIES_VIEW]), async (req
       count: enrichedCompanies.length
     });
   } catch (error) {
-    console.error('❌ GET /companies/active error:', error);
+    logger.error('GET /companies/active error:', error);
     res.status(500).json({
       success: false,
       message: 'Error fetching active companies',
-      error: error.message
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
 });
@@ -231,7 +237,6 @@ router.get('/stats/global', checkPermissions([PERMISSIONS.COMPANIES_VIEW]), asyn
     const suspended = await Company.countDocuments({ status: 'suspended', deletedAt: null });
     const archived = await Company.countDocuments({ status: 'archived', deletedAt: null });
 
-    // حساب إجمالي المصانع والمستخدمين عبر جميع الشركات
     const Factory = require('../../factories/models/Factory.model');
     const User = require('../../users/models/User.model');
 
@@ -254,11 +259,11 @@ router.get('/stats/global', checkPermissions([PERMISSIONS.COMPANIES_VIEW]), asyn
       }
     });
   } catch (error) {
-    console.error('❌ GET /companies/stats error:', error);
+    logger.error('GET /companies/stats error:', error);
     res.status(500).json({
       success: false,
       message: 'Error fetching stats',
-      error: error.message
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
 });
@@ -285,26 +290,24 @@ router.post('/', checkPermissions([PERMISSIONS.COMPANIES_CREATE]), async (req, r
       });
     }
 
-    // ✅ إنشاء companyId تلقائي (بدل الاعتماد على الـ Request)
-    const companyId = `comp_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+    // توليد companyId فريد
+    const companyId = generateCompanyId();
 
     // إنشاء شركة جديدة
     const newCompany = new Company({
-      name,
-      code: code.toUpperCase(),
+      name: name.trim(),
+      code: code.toUpperCase().trim(),
       industry,
-      contactEmail,
+      contactEmail: contactEmail.toLowerCase().trim(),
       contactPhone: contactPhone || null,
       address: address || {},
-      description: description || null,
-      website: website || null,
+      description: description ? description.trim() : null,
+      website: website ? website.trim() : null,
       status: 'active',
-      companyId: companyId // ✅ companyId من السيرفر مش من الـ Request
+      companyId
     });
 
     const savedCompany = await newCompany.save();
-
-    // ✅ إرجاع الشركة مع الإحصائيات
     const enrichedCompany = await enrichCompanyWithStats(savedCompany);
 
     res.status(201).json({
@@ -313,9 +316,8 @@ router.post('/', checkPermissions([PERMISSIONS.COMPANIES_CREATE]), async (req, r
       data: enrichedCompany
     });
   } catch (error) {
-    console.error('❌ Error creating company:', error);
+    logger.error('Error creating company:', error);
     
-    // معالجة أخطاء MongoDB
     if (error.code === 11000) {
       return res.status(409).json({
         success: false,
@@ -344,20 +346,18 @@ router.put('/:id', checkPermissions([PERMISSIONS.COMPANIES_UPDATE]), async (req,
       });
     }
 
-    // تحديث الحقول
-    if (name) company.name = name;
+    // تحديث الحقول مع التنظيف
+    if (name) company.name = name.trim();
     if (industry) company.industry = industry;
-    if (contactEmail) company.contactEmail = contactEmail;
+    if (contactEmail) company.contactEmail = contactEmail.toLowerCase().trim();
     if (contactPhone) company.contactPhone = contactPhone;
     if (address) company.address = address;
-    if (description) company.description = description;
-    if (website) company.website = website;
+    if (description !== undefined) company.description = description ? description.trim() : null;
+    if (website !== undefined) company.website = website ? website.trim() : null;
     if (status) company.status = status;
 
     company.updatedAt = new Date();
     const updatedCompany = await company.save();
-
-    // إرجاع الشركة مع الإحصائيات
     const enrichedCompany = await enrichCompanyWithStats(updatedCompany);
 
     res.json({
@@ -366,11 +366,11 @@ router.put('/:id', checkPermissions([PERMISSIONS.COMPANIES_UPDATE]), async (req,
       data: enrichedCompany
     });
   } catch (error) {
-    console.error('❌ Error updating company:', error);
+    logger.error('Error updating company:', error);
     res.status(500).json({
       success: false,
       message: 'Error updating company',
-      error: error.message
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
 });
@@ -384,6 +384,14 @@ router.put('/:id/status', checkPermissions([PERMISSIONS.COMPANIES_UPDATE]), asyn
       return res.status(400).json({
         success: false,
         message: 'Status is required'
+      });
+    }
+
+    const validStatuses = ['active', 'inactive', 'suspended', 'archived'];
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: `Invalid status. Must be one of: ${validStatuses.join(', ')}`
       });
     }
 
@@ -405,11 +413,11 @@ router.put('/:id/status', checkPermissions([PERMISSIONS.COMPANIES_UPDATE]), asyn
       data: updatedCompany
     });
   } catch (error) {
-    console.error('❌ Error updating company status:', error);
+    logger.error('Error updating company status:', error);
     res.status(500).json({
       success: false,
       message: 'Error updating company status',
-      error: error.message
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
 });
@@ -455,11 +463,11 @@ router.delete('/:id', checkPermissions([PERMISSIONS.COMPANIES_DELETE]), async (r
       }
     });
   } catch (error) {
-    console.error('❌ Error deleting company:', error);
+    logger.error('Error deleting company:', error);
     res.status(500).json({
       success: false,
       message: 'Error deleting company',
-      error: error.message
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
 });

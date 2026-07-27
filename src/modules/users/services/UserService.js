@@ -19,7 +19,72 @@ const { PERMISSIONS, hasPermission } = require('../../../core/middleware/permiss
 class UserService extends BaseService {
   constructor() {
     super(new UserRepository(), 'User');
-    this.repository = this.repository; // Type cast
+    this.repository = this.repository;
+  }
+
+  // ============ HELPER METHODS ============
+
+  /**
+   * التحقق من صحة البريد الإلكتروني
+   */
+  isValidEmail(email) {
+    if (!email) return false;
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(email);
+  }
+
+  /**
+   * إنشاء كلمة مرور مؤقتة آمنة
+   */
+  generateTemporaryPassword() {
+    const length = 16;
+    const charset = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()_+-=';
+    let password = '';
+    const array = new Uint32Array(length);
+    crypto.getRandomValues(array);
+    for (let i = 0; i < length; i++) {
+      password += charset[array[i] % charset.length];
+    }
+    return password;
+  }
+
+  /**
+   * التحقق من صلاحية إدارة مستخدم
+   */
+  async canManageUser(managerId, targetUser, companyId) {
+    // إذا كان المدير هو نفسه المستخدم
+    if (managerId === targetUser._id.toString()) return true;
+
+    // التحقق من صلاحيات المدير من قاعدة البيانات
+    try {
+      const manager = await this.repository.findById(managerId, companyId);
+      if (!manager) return false;
+
+      // Super Admin يمكنه إدارة كل المستخدمين
+      if (manager.role === 'super_admin') return true;
+
+      // Admin يمكنه إدارة المستخدمين في نفس الشركة (ما عدا الـ Admin الآخرين)
+      if (manager.role === 'admin') {
+        return manager.companyId === targetUser.companyId && 
+               targetUser.role !== 'admin' && 
+               targetUser.role !== 'super_admin';
+      }
+
+      // Manager يمكنه إدارة المستخدمين في نفس الأقسام
+      if (manager.role === 'manager') {
+        const hasCommonDepartment = manager.departmentIds.some(
+          id => targetUser.departmentIds.includes(id)
+        );
+        return manager.companyId === targetUser.companyId &&
+               hasCommonDepartment &&
+               ['engineer', 'employee', 'viewer'].includes(targetUser.role);
+      }
+
+      return false;
+    } catch (error) {
+      logger.error('Error checking manage permission:', error);
+      return false;
+    }
   }
 
   // ============ CREATE ============
@@ -37,37 +102,55 @@ class UserService extends BaseService {
         throw new ValidationError('Invalid email format');
       }
 
-      // 3. التحقق من عدم وجود مستخدم بنفس البريد
-      const existingUser = await this.repository.findByEmail(data.email, companyId);
-      if (existingUser) {
-        throw new ConflictError('User with this email already exists');
+      // 3. التحقق من وجود companyId
+      if (!companyId) {
+        throw new ValidationError('Company ID is required');
       }
 
-      // 4. إنشاء مستخدم في Firebase
+      // 4. التحقق من عدم وجود مستخدم بنفس البريد في نفس الشركة
+      const existingUser = await this.repository.findByEmail(data.email, companyId);
+      if (existingUser) {
+        throw new ConflictError('User with this email already exists in this company');
+      }
+
+      // 5. التحقق من صحة الدور
+      const validRoles = ['super_admin', 'admin', 'manager', 'engineer', 'employee', 'viewer'];
+      if (data.role && !validRoles.includes(data.role)) {
+        throw new ValidationError(`Invalid role. Must be one of: ${validRoles.join(', ')}`);
+      }
+
+      // 6. إنشاء مستخدم في Firebase
       const password = data.password || this.generateTemporaryPassword();
       const firebaseUser = await firebaseService.createUser(
-        data.email,
+        data.email.toLowerCase().trim(),
         password,
-        data.displayName
+        data.displayName.trim()
       );
 
-      // 5. تحضير بيانات المستخدم
+      // 7. تحضير بيانات المستخدم
       const userData = {
         ...data,
+        email: data.email.toLowerCase().trim(),
+        displayName: data.displayName.trim(),
+        firstName: data.firstName ? data.firstName.trim() : null,
+        lastName: data.lastName ? data.lastName.trim() : null,
+        phoneNumber: data.phoneNumber || null,
         firebaseUid: firebaseUser.uid,
         emailVerified: firebaseUser.emailVerified || false,
         createdBy: userId,
         updatedBy: userId,
-        companyId
+        companyId,
+        role: data.role || 'employee',
+        status: 'active'
       };
 
       // إزالة كلمة المرور من البيانات
       delete userData.password;
 
-      // 6. إنشاء المستخدم في قاعدة البيانات
+      // 8. إنشاء المستخدم في قاعدة البيانات
       const user = await this.repository.create(userData);
 
-      // 7. ✅ تحديث Firebase Claims تلقائياً
+      // 9. تحديث Firebase Claims تلقائياً
       try {
         await firebaseService.setCustomClaims(firebaseUser.uid, {
           role: data.role || 'employee',
@@ -80,10 +163,9 @@ class UserService extends BaseService {
         });
       } catch (claimsError) {
         logger.warn('Failed to set Firebase claims:', claimsError.message);
-        // مش مشكلة كبيرة، لأن Auth Middleware هيسحب من MongoDB
       }
 
-      // 8. إرسال حدث
+      // 10. إرسال حدث
       eventEmitter.emit(EventTypes.USER_CREATED, {
         userId: user._id,
         email: user.email,
@@ -91,14 +173,15 @@ class UserService extends BaseService {
         createdBy: userId
       });
 
-      // 9. تسجيل العملية
+      // 11. تسجيل العملية
       logger.info('User created successfully', {
         userId: user._id,
         email: user.email,
-        companyId
+        companyId,
+        role: user.role
       });
 
-      // 10. إرجاع المستخدم مع كلمة المرور المؤقتة (إذا كانت جديدة)
+      // 12. إرجاع المستخدم مع كلمة المرور المؤقتة (إذا كانت جديدة)
       const result = user.toJSON ? user.toJSON() : user;
       if (!data.password) {
         result.temporaryPassword = password;
@@ -117,6 +200,10 @@ class UserService extends BaseService {
    * الحصول على مستخدم بالمعرف
    */
   async getUserById(id, companyId) {
+    if (!id) {
+      throw new ValidationError('User ID is required');
+    }
+
     const user = await this.repository.findById(id, companyId);
     if (!user) {
       throw new NotFoundError('User not found');
@@ -128,6 +215,10 @@ class UserService extends BaseService {
    * الحصول على مستخدم بـ Firebase UID
    */
   async getUserByFirebaseUid(firebaseUid) {
+    if (!firebaseUid) {
+      throw new ValidationError('Firebase UID is required');
+    }
+
     const user = await this.repository.findByFirebaseUid(firebaseUid);
     if (!user) {
       throw new NotFoundError('User not found');
@@ -139,6 +230,10 @@ class UserService extends BaseService {
    * الحصول على مستخدم بالإيميل
    */
   async getUserByEmail(email, companyId) {
+    if (!email) {
+      throw new ValidationError('Email is required');
+    }
+
     const user = await this.repository.findByEmail(email, companyId);
     if (!user) {
       throw new NotFoundError('User not found');
@@ -150,6 +245,9 @@ class UserService extends BaseService {
    * الحصول على قائمة المستخدمين
    */
   async getUsers(companyId, filter = {}, options = {}) {
+    if (!companyId) {
+      throw new ValidationError('Company ID is required');
+    }
     return this.repository.find(filter, companyId, options);
   }
 
@@ -157,6 +255,9 @@ class UserService extends BaseService {
    * الحصول على قائمة المستخدمين مع Pagination
    */
   async getUsersPaginated(companyId, page, limit, filter = {}) {
+    if (!companyId) {
+      throw new ValidationError('Company ID is required');
+    }
     return this.repository.paginate(filter, companyId, page, limit);
   }
 
@@ -164,6 +265,18 @@ class UserService extends BaseService {
    * الحصول على مستخدمين حسب الدور
    */
   async getUsersByRole(role, companyId) {
+    if (!role) {
+      throw new ValidationError('Role is required');
+    }
+    if (!companyId) {
+      throw new ValidationError('Company ID is required');
+    }
+
+    const validRoles = ['super_admin', 'admin', 'manager', 'engineer', 'employee', 'viewer'];
+    if (!validRoles.includes(role)) {
+      throw new ValidationError(`Invalid role. Must be one of: ${validRoles.join(', ')}`);
+    }
+
     return this.repository.findByRole(role, companyId);
   }
 
@@ -171,6 +284,13 @@ class UserService extends BaseService {
    * الحصول على مستخدمين حسب المصنع
    */
   async getUsersByFactory(factoryId, companyId) {
+    if (!factoryId) {
+      throw new ValidationError('Factory ID is required');
+    }
+    if (!companyId) {
+      throw new ValidationError('Company ID is required');
+    }
+
     return this.repository.findByFactory(factoryId, companyId);
   }
 
@@ -178,6 +298,13 @@ class UserService extends BaseService {
    * الحصول على مستخدمين حسب القسم
    */
   async getUsersByDepartment(departmentId, companyId) {
+    if (!departmentId) {
+      throw new ValidationError('Department ID is required');
+    }
+    if (!companyId) {
+      throw new ValidationError('Company ID is required');
+    }
+
     return this.repository.findByDepartment(departmentId, companyId);
   }
 
@@ -185,6 +312,9 @@ class UserService extends BaseService {
    * الحصول على المستخدمين النشطين
    */
   async getActiveUsers(companyId) {
+    if (!companyId) {
+      throw new ValidationError('Company ID is required');
+    }
     return this.repository.findActive(companyId);
   }
 
@@ -195,6 +325,10 @@ class UserService extends BaseService {
     if (!query || query.length < 2) {
       throw new ValidationError('Search query must be at least 2 characters');
     }
+    if (!companyId) {
+      throw new ValidationError('Company ID is required');
+    }
+
     return this.repository.search(query, companyId);
   }
 
@@ -202,6 +336,10 @@ class UserService extends BaseService {
    * الحصول على مستخدم مع البيانات المرتبطة
    */
   async getUserWithRelations(id, companyId) {
+    if (!id) {
+      throw new ValidationError('User ID is required');
+    }
+
     const user = await this.repository.findWithRelations(id, companyId);
     if (!user) {
       throw new NotFoundError('User not found');
@@ -223,7 +361,8 @@ class UserService extends BaseService {
       }
 
       // 2. التحقق من الصلاحيات
-      if (!this.canManageUser(userId, existingUser, companyId)) {
+      const canManage = await this.canManageUser(userId, existingUser, companyId);
+      if (!canManage) {
         throw new ForbiddenError('You do not have permission to update this user');
       }
 
@@ -237,7 +376,12 @@ class UserService extends BaseService {
       const updateData = {};
       for (const key of allowedUpdates) {
         if (data[key] !== undefined) {
-          updateData[key] = data[key];
+          // تنظيف البيانات النصية
+          if (typeof data[key] === 'string' && ['displayName', 'firstName', 'lastName', 'phoneNumber', 'bio'].includes(key)) {
+            updateData[key] = data[key].trim();
+          } else {
+            updateData[key] = data[key];
+          }
         }
       }
 
@@ -247,20 +391,22 @@ class UserService extends BaseService {
           throw new ValidationError('Invalid email format');
         }
         
-        // التحقق من عدم وجود مستخدم آخر بنفس البريد
+        // التحقق من عدم وجود مستخدم آخر بنفس البريد في نفس الشركة
         const emailExists = await this.repository.existsByEmail(data.email, id);
         if (emailExists) {
-          throw new ConflictError('Email already in use');
+          throw new ConflictError('Email already in use by another user');
         }
         
-        await firebaseService.updateUser(existingUser.firebaseUid, { email: data.email });
-        updateData.email = data.email;
+        await firebaseService.updateUser(existingUser.firebaseUid, { 
+          email: data.email.toLowerCase().trim() 
+        });
+        updateData.email = data.email.toLowerCase().trim();
       }
 
       // 5. تحديث الاسم في Firebase (إذا تغير)
-      if (data.displayName && data.displayName !== existingUser.displayName) {
+      if (data.displayName && data.displayName.trim() !== existingUser.displayName) {
         await firebaseService.updateUser(existingUser.firebaseUid, {
-          displayName: data.displayName
+          displayName: data.displayName.trim()
         });
       }
 
@@ -270,7 +416,7 @@ class UserService extends BaseService {
       // 7. تحديث المستخدم
       const updatedUser = await this.repository.update(id, updateData, companyId);
 
-      // 8. ✅ تحديث Firebase Claims إذا تغير الـ Role أو الـ Permissions
+      // 8. تحديث Firebase Claims إذا تغير الـ Role أو الـ Permissions
       if (data.role || data.permissions) {
         try {
           await firebaseService.setCustomClaims(updatedUser.firebaseUid, {
@@ -331,14 +477,18 @@ class UserService extends BaseService {
       const updateData = {};
       for (const key of allowedUpdates) {
         if (data[key] !== undefined) {
-          updateData[key] = data[key];
+          if (typeof data[key] === 'string') {
+            updateData[key] = data[key].trim();
+          } else {
+            updateData[key] = data[key];
+          }
         }
       }
 
       // تحديث الاسم في Firebase (إذا تغير)
-      if (data.displayName && data.displayName !== user.displayName) {
+      if (data.displayName && data.displayName.trim() !== user.displayName) {
         await firebaseService.updateUser(user.firebaseUid, {
-          displayName: data.displayName
+          displayName: data.displayName.trim()
         });
       }
 
@@ -369,7 +519,8 @@ class UserService extends BaseService {
       }
 
       // التحقق من الصلاحيات
-      if (userId !== 'system' && !this.canManageUser(userId, user, companyId)) {
+      const canManage = await this.canManageUser(userId, user, companyId);
+      if (!canManage) {
         throw new ForbiddenError('You do not have permission to change this user\'s role');
       }
 
@@ -378,9 +529,15 @@ class UserService extends BaseService {
         throw new ForbiddenError('Cannot change Super Admin role');
       }
 
+      // التحقق من صحة الدور
+      const validRoles = ['super_admin', 'admin', 'manager', 'engineer', 'employee', 'viewer'];
+      if (!validRoles.includes(role)) {
+        throw new ValidationError(`Invalid role. Must be one of: ${validRoles.join(', ')}`);
+      }
+
       const updatedUser = await this.repository.updateRole(id, role, companyId);
 
-      // ✅ تحديث الصلاحيات المخصصة في Firebase
+      // تحديث الصلاحيات المخصصة في Firebase
       try {
         await firebaseService.setCustomClaims(user.firebaseUid, {
           role,
@@ -396,7 +553,6 @@ class UserService extends BaseService {
         });
       } catch (claimsError) {
         logger.warn('Failed to update Firebase claims for role:', claimsError.message);
-        // مش مشكلة كبيرة، لأن Auth Middleware هيسحب من MongoDB
       }
 
       logger.info('User role updated', {
@@ -424,7 +580,8 @@ class UserService extends BaseService {
       }
 
       // التحقق من الصلاحيات
-      if (userId !== 'system' && !this.canManageUser(userId, user, companyId)) {
+      const canManage = await this.canManageUser(userId, user, companyId);
+      if (!canManage) {
         throw new ForbiddenError('You do not have permission to change this user\'s permissions');
       }
 
@@ -435,7 +592,7 @@ class UserService extends BaseService {
 
       const updatedUser = await this.repository.updatePermissions(id, permissions, companyId);
 
-      // ✅ تحديث الصلاحيات في Firebase
+      // تحديث الصلاحيات في Firebase
       try {
         await firebaseService.setCustomClaims(user.firebaseUid, {
           role: user.role,
@@ -476,13 +633,20 @@ class UserService extends BaseService {
       }
 
       // التحقق من الصلاحيات
-      if (userId !== 'system' && !this.canManageUser(userId, user, companyId)) {
+      const canManage = await this.canManageUser(userId, user, companyId);
+      if (!canManage) {
         throw new ForbiddenError('You do not have permission to change this user\'s status');
       }
 
       // لا يمكن تغيير حالة Super Admin
       if (user.role === 'super_admin') {
         throw new ForbiddenError('Cannot change Super Admin status');
+      }
+
+      // التحقق من صحة الحالة
+      const validStatuses = ['active', 'inactive', 'suspended', 'archived'];
+      if (!validStatuses.includes(status)) {
+        throw new ValidationError(`Invalid status. Must be one of: ${validStatuses.join(', ')}`);
       }
 
       const updatedUser = await this.repository.updateStatus(id, status, companyId);
@@ -537,7 +701,8 @@ class UserService extends BaseService {
       }
 
       // التحقق من الصلاحيات
-      if (userId !== 'system' && !this.canManageUser(userId, user, companyId)) {
+      const canManage = await this.canManageUser(userId, user, companyId);
+      if (!canManage) {
         throw new ForbiddenError('You do not have permission to delete this user');
       }
 
@@ -552,7 +717,12 @@ class UserService extends BaseService {
       }
 
       // حذف من Firebase
-      await firebaseService.deleteUser(user.firebaseUid);
+      try {
+        await firebaseService.deleteUser(user.firebaseUid);
+      } catch (firebaseError) {
+        logger.warn('Failed to delete user from Firebase:', firebaseError.message);
+        // نكمل الحذف من قاعدة البيانات حتى لو فشل حذف Firebase
+      }
 
       // حذف من قاعدة البيانات (Soft Delete)
       const deletedUser = await this.repository.softDelete(id, companyId);
@@ -598,7 +768,8 @@ class UserService extends BaseService {
       }
 
       // التحقق من الصلاحيات
-      if (userId !== 'system' && !this.canManageUser(userId, user, companyId)) {
+      const canManage = await this.canManageUser(userId, user, companyId);
+      if (!canManage) {
         throw new ForbiddenError('You do not have permission to delete this user');
       }
 
@@ -613,7 +784,12 @@ class UserService extends BaseService {
       }
 
       // حذف من Firebase
-      await firebaseService.deleteUser(user.firebaseUid);
+      try {
+        await firebaseService.deleteUser(user.firebaseUid);
+      } catch (firebaseError) {
+        logger.warn('Failed to delete user from Firebase:', firebaseError.message);
+        // نكمل الحذف من قاعدة البيانات حتى لو فشل حذف Firebase
+      }
 
       // حذف من قاعدة البيانات نهائياً
       await this.repository.delete(id, companyId);
@@ -748,18 +924,26 @@ class UserService extends BaseService {
    */
   async syncFirebaseUser(firebaseUid, companyId) {
     try {
+      if (!firebaseUid) {
+        throw new ValidationError('Firebase UID is required');
+      }
+      if (!companyId) {
+        throw new ValidationError('Company ID is required');
+      }
+
       const firebaseUser = await firebaseService.getUser(firebaseUid);
       const user = await this.repository.findByFirebaseUid(firebaseUid);
 
       if (!user) {
         // إنشاء مستخدم جديد
         const userData = {
-          email: firebaseUser.email,
-          displayName: firebaseUser.displayName || firebaseUser.email,
+          email: firebaseUser.email.toLowerCase().trim(),
+          displayName: (firebaseUser.displayName || firebaseUser.email).trim(),
           firebaseUid: firebaseUser.uid,
           emailVerified: firebaseUser.emailVerified || false,
           companyId,
-          role: 'employee'
+          role: 'employee',
+          status: 'active'
         };
 
         return this.repository.create(userData);
@@ -767,11 +951,18 @@ class UserService extends BaseService {
 
       // تحديث البيانات إذا تغيرت
       const updates = {};
-      if (firebaseUser.email !== user.email) updates.email = firebaseUser.email;
-      if (firebaseUser.displayName !== user.displayName) updates.displayName = firebaseUser.displayName;
-      if (firebaseUser.emailVerified !== user.emailVerified) updates.emailVerified = firebaseUser.emailVerified;
+      if (firebaseUser.email !== user.email) {
+        updates.email = firebaseUser.email.toLowerCase().trim();
+      }
+      if (firebaseUser.displayName !== user.displayName) {
+        updates.displayName = (firebaseUser.displayName || firebaseUser.email).trim();
+      }
+      if (firebaseUser.emailVerified !== user.emailVerified) {
+        updates.emailVerified = firebaseUser.emailVerified;
+      }
 
       if (Object.keys(updates).length > 0) {
+        updates.updatedBy = 'system';
         return this.repository.update(user._id, updates, companyId);
       }
 
@@ -785,32 +976,16 @@ class UserService extends BaseService {
   // ============ VALIDATION ============
 
   /**
-   * التحقق من صحة البريد الإلكتروني
-   */
-  isValidEmail(email) {
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    return emailRegex.test(email);
-  }
-
-  /**
-   * التحقق من صلاحية إدارة مستخدم
-   */
-  canManageUser(managerId, targetUser, companyId) {
-    // إذا كان المدير هو نفسه المستخدم
-    if (managerId === targetUser._id) return true;
-
-    // التحقق من وجود المستخدم المدير
-    // TODO: الحصول على المستخدم المدير من قاعدة البيانات
-    // هنا نفترض أن المدير لديه صلاحيات كافية
-    
-    // يمكن إضافة منطق أكثر تعقيداً هنا
-    return true;
-  }
-
-  /**
    * التحقق من صحة المستخدم
    */
   async validateUser(userId, companyId) {
+    if (!userId) {
+      throw new ValidationError('User ID is required');
+    }
+    if (!companyId) {
+      throw new ValidationError('Company ID is required');
+    }
+
     const user = await this.repository.findById(userId, companyId);
     if (!user || user.status !== 'active' || user.deletedAt) {
       throw new ForbiddenError('User not found or inactive');
@@ -818,24 +993,28 @@ class UserService extends BaseService {
     return user;
   }
 
-  // ============ HELPERS ============
-
   /**
-   * إنشاء كلمة مرور مؤقتة
+   * التحقق من وجود مستخدم
    */
-  generateTemporaryPassword() {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*';
-    let password = '';
-    for (let i = 0; i < 12; i++) {
-      password += chars.charAt(Math.floor(Math.random() * chars.length));
+  async userExists(userId, companyId) {
+    if (!userId) return false;
+    try {
+      const user = await this.repository.findById(userId, companyId);
+      return !!user && user.deletedAt === null;
+    } catch (error) {
+      return false;
     }
-    return password;
   }
+
+  // ============ STATISTICS ============
 
   /**
    * الحصول على إحصائيات المستخدمين
    */
   async getStats(companyId) {
+    if (!companyId) {
+      throw new ValidationError('Company ID is required');
+    }
     return this.repository.getStats(companyId);
   }
 
@@ -843,6 +1022,9 @@ class UserService extends BaseService {
    * الحصول على توزيع المستخدمين حسب الدور
    */
   async getRoleDistribution(companyId) {
+    if (!companyId) {
+      throw new ValidationError('Company ID is required');
+    }
     return this.repository.getRoleDistribution(companyId);
   }
 
@@ -850,6 +1032,9 @@ class UserService extends BaseService {
    * الحصول على عدد المستخدمين
    */
   async getUserCount(companyId, filter = {}) {
+    if (!companyId) {
+      throw new ValidationError('Company ID is required');
+    }
     return this.repository.count(filter, companyId);
   }
 
@@ -857,6 +1042,15 @@ class UserService extends BaseService {
    * تصدير المستخدمين
    */
   async exportUsers(companyId, format = 'json') {
+    if (!companyId) {
+      throw new ValidationError('Company ID is required');
+    }
+
+    const validFormats = ['json', 'csv'];
+    if (!validFormats.includes(format)) {
+      throw new ValidationError(`Invalid format. Must be one of: ${validFormats.join(', ')}`);
+    }
+
     return this.repository.exportUsers(companyId, format);
   }
 }

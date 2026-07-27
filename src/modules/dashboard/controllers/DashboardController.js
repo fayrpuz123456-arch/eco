@@ -28,6 +28,7 @@ const createDashboardSchema = Joi.object({
     'water', 'carbon', 'waste', 'maintenance', 'financial', 'custom'
   ).required(),
   layout: Joi.string().valid('grid', 'list', 'flex', 'custom').default('grid'),
+  companyId: Joi.string().optional(), // ✅ إضافة companyId كاختياري
   preferences: Joi.object({
     refreshRate: Joi.number().default(30),
     autoRefresh: Joi.boolean().default(true),
@@ -110,8 +111,24 @@ class DashboardController extends BaseController {
 
   async create(req, res) {
     try {
-      const { companyId, user } = req;
-      const result = await this.service.createDashboard(req.body, user.id, companyId);
+      // ✅ استخدام companyId من الـ Body أو من الـ Auth
+      const companyId = req.body.companyId || req.companyId;
+      const userId = req.user.id;
+
+      if (!companyId || !userId) {
+        return sendUnauthorized(res, 'Unauthorized: user/company context missing from request');
+      }
+
+      // ✅ التأكد من أن companyId في الـ Body مطابق للـ companyId من الـ Auth (لأغراض أمنية)
+      if (req.body.companyId && req.body.companyId !== companyId) {
+        return sendForbidden(res, 'Forbidden: You cannot create dashboards for another company');
+      }
+
+      // ✅ إزالة companyId من الـ Body لمنع التلاعب
+      const body = { ...req.body };
+      delete body.companyId;
+
+      const result = await this.service.createDashboard(body, userId, companyId);
       return sendCreated(res, 'Dashboard created successfully', result);
     } catch (error) {
       logger.error('Create dashboard error:', error);
@@ -123,8 +140,15 @@ class DashboardController extends BaseController {
 
   async getList(req, res) {
     try {
-      const { user, companyId } = req;
-      const result = await this.service.getUserDashboards(user.id, companyId);
+      // ✅ استخدام companyId من الـ Body أو من الـ Auth
+      const companyId = req.body.companyId || req.companyId || req.query.companyId;
+      const userId = req.user.id;
+
+      if (!companyId || !userId) {
+        return sendUnauthorized(res, 'Unauthorized: user/company context missing from request');
+      }
+
+      const result = await this.service.getUserDashboards(userId, companyId);
       return sendResponse(res, 200, 'Dashboards retrieved successfully', result);
     } catch (error) {
       logger.error('Get dashboards list error:', error);
@@ -135,8 +159,15 @@ class DashboardController extends BaseController {
   async getById(req, res) {
     try {
       const { id } = req.params;
-      const { user, companyId } = req;
-      const result = await this.service.getDashboardById(id, user.id, companyId);
+      // ✅ استخدام companyId من الـ Body أو من الـ Auth
+      const companyId = req.body.companyId || req.companyId || req.query.companyId;
+      const userId = req.user.id;
+
+      if (!companyId || !userId) {
+        return sendUnauthorized(res, 'Unauthorized: user/company context missing from request');
+      }
+
+      const result = await this.service.getDashboardById(id, userId, companyId);
       return sendResponse(res, 200, 'Dashboard retrieved successfully', result);
     } catch (error) {
       logger.error('Get dashboard by id error:', error);
@@ -146,8 +177,15 @@ class DashboardController extends BaseController {
 
   async getDefault(req, res) {
     try {
-      const { user, companyId } = req;
-      const result = await this.service.getDefaultDashboard(user.id, companyId);
+      // ✅ استخدام companyId من الـ Body أو من الـ Auth
+      const companyId = req.body.companyId || req.companyId || req.query.companyId;
+      const userId = req.user.id;
+
+      if (!companyId || !userId) {
+        return sendUnauthorized(res, 'Unauthorized: user/company context missing from request');
+      }
+
+      const result = await this.service.getDefaultDashboard(userId, companyId);
       return sendResponse(res, 200, 'Default dashboard retrieved successfully', result);
     } catch (error) {
       logger.error('Get default dashboard error:', error);
@@ -183,8 +221,15 @@ class DashboardController extends BaseController {
   async getMetrics(req, res) {
     try {
       const { id } = req.params;
-      const { user, companyId } = req;
-      const result = await this.service.getDashboardMetrics(id, user.id, companyId);
+      // ✅ استخدام companyId من الـ Body أو من الـ Auth
+      const companyId = req.body.companyId || req.companyId || req.query.companyId;
+      const userId = req.user.id;
+
+      if (!companyId || !userId) {
+        return sendUnauthorized(res, 'Unauthorized: user/company context missing from request');
+      }
+
+      const result = await this.service.getDashboardMetrics(id, userId, companyId);
       return sendResponse(res, 200, 'Dashboard metrics retrieved successfully', result);
     } catch (error) {
       logger.error('Get dashboard metrics error:', error);
@@ -195,8 +240,15 @@ class DashboardController extends BaseController {
   async refreshMetrics(req, res) {
     try {
       const { id } = req.params;
-      const { user, companyId } = req;
-      const result = await this.service.refreshDashboardMetrics(id, user.id, companyId);
+      // ✅ استخدام companyId من الـ Body أو من الـ Auth
+      const companyId = req.body.companyId || req.companyId || req.query.companyId;
+      const userId = req.user.id;
+
+      if (!companyId || !userId) {
+        return sendUnauthorized(res, 'Unauthorized: user/company context missing from request');
+      }
+
+      const result = await this.service.refreshDashboardMetrics(id, userId, companyId);
       return sendResponse(res, 200, 'Dashboard metrics refreshed successfully', result);
     } catch (error) {
       logger.error('Refresh dashboard metrics error:', error);
@@ -209,8 +261,19 @@ class DashboardController extends BaseController {
   async update(req, res) {
     try {
       const { id } = req.params;
-      const { companyId, user } = req;
-      const result = await this.service.updateDashboard(id, req.body, user.id, companyId);
+      // ✅ استخدام companyId من الـ Body أو من الـ Auth
+      const companyId = req.body.companyId || req.companyId || req.query.companyId;
+      const userId = req.user.id;
+
+      if (!companyId || !userId) {
+        return sendUnauthorized(res, 'Unauthorized: user/company context missing from request');
+      }
+
+      // ✅ منع تحديث companyId
+      const body = { ...req.body };
+      delete body.companyId;
+
+      const result = await this.service.updateDashboard(id, body, userId, companyId);
       return sendResponse(res, 200, 'Dashboard updated successfully', result);
     } catch (error) {
       logger.error('Update dashboard error:', error);
@@ -221,8 +284,15 @@ class DashboardController extends BaseController {
   async setDefault(req, res) {
     try {
       const { id } = req.params;
-      const { user, companyId } = req;
-      const result = await this.service.setDefaultDashboard(id, user.id, companyId);
+      // ✅ استخدام companyId من الـ Body أو من الـ Auth
+      const companyId = req.body.companyId || req.companyId || req.query.companyId;
+      const userId = req.user.id;
+
+      if (!companyId || !userId) {
+        return sendUnauthorized(res, 'Unauthorized: user/company context missing from request');
+      }
+
+      const result = await this.service.setDefaultDashboard(id, userId, companyId);
       return sendResponse(res, 200, 'Default dashboard set successfully', result);
     } catch (error) {
       logger.error('Set default dashboard error:', error);
@@ -235,8 +305,15 @@ class DashboardController extends BaseController {
   async addWidget(req, res) {
     try {
       const { id } = req.params;
-      const { companyId, user } = req;
-      const result = await this.service.addWidget(id, req.body, user.id, companyId);
+      // ✅ استخدام companyId من الـ Body أو من الـ Auth
+      const companyId = req.body.companyId || req.companyId || req.query.companyId;
+      const userId = req.user.id;
+
+      if (!companyId || !userId) {
+        return sendUnauthorized(res, 'Unauthorized: user/company context missing from request');
+      }
+
+      const result = await this.service.addWidget(id, req.body, userId, companyId);
       return sendResponse(res, 200, 'Widget added successfully', result);
     } catch (error) {
       logger.error('Add widget error:', error);
@@ -247,8 +324,15 @@ class DashboardController extends BaseController {
   async removeWidget(req, res) {
     try {
       const { id, widgetId } = req.params;
-      const { user, companyId } = req;
-      const result = await this.service.removeWidget(id, widgetId, user.id, companyId);
+      // ✅ استخدام companyId من الـ Body أو من الـ Auth
+      const companyId = req.body.companyId || req.companyId || req.query.companyId;
+      const userId = req.user.id;
+
+      if (!companyId || !userId) {
+        return sendUnauthorized(res, 'Unauthorized: user/company context missing from request');
+      }
+
+      const result = await this.service.removeWidget(id, widgetId, userId, companyId);
       return sendResponse(res, 200, 'Widget removed successfully', result);
     } catch (error) {
       logger.error('Remove widget error:', error);
@@ -259,8 +343,15 @@ class DashboardController extends BaseController {
   async updateWidget(req, res) {
     try {
       const { id, widgetId } = req.params;
-      const { companyId, user } = req;
-      const result = await this.service.updateWidget(id, widgetId, req.body, user.id, companyId);
+      // ✅ استخدام companyId من الـ Body أو من الـ Auth
+      const companyId = req.body.companyId || req.companyId || req.query.companyId;
+      const userId = req.user.id;
+
+      if (!companyId || !userId) {
+        return sendUnauthorized(res, 'Unauthorized: user/company context missing from request');
+      }
+
+      const result = await this.service.updateWidget(id, widgetId, req.body, userId, companyId);
       return sendResponse(res, 200, 'Widget updated successfully', result);
     } catch (error) {
       logger.error('Update widget error:', error);
@@ -271,9 +362,16 @@ class DashboardController extends BaseController {
   async reorderWidgets(req, res) {
     try {
       const { id } = req.params;
-      const { companyId, user } = req;
+      // ✅ استخدام companyId من الـ Body أو من الـ Auth
+      const companyId = req.body.companyId || req.companyId || req.query.companyId;
+      const userId = req.user.id;
+
+      if (!companyId || !userId) {
+        return sendUnauthorized(res, 'Unauthorized: user/company context missing from request');
+      }
+
       const { widgetIds } = req.body;
-      const result = await this.service.reorderWidgets(id, widgetIds, user.id, companyId);
+      const result = await this.service.reorderWidgets(id, widgetIds, userId, companyId);
       return sendResponse(res, 200, 'Widgets reordered successfully', result);
     } catch (error) {
       logger.error('Reorder widgets error:', error);
@@ -286,9 +384,16 @@ class DashboardController extends BaseController {
   async delete(req, res) {
     try {
       const { id } = req.params;
-      const { companyId, user } = req;
+      // ✅ استخدام companyId من الـ Body أو من الـ Auth
+      const companyId = req.body.companyId || req.companyId || req.query.companyId;
+      const userId = req.user.id;
+
+      if (!companyId || !userId) {
+        return sendUnauthorized(res, 'Unauthorized: user/company context missing from request');
+      }
+
       const { reason } = req.body;
-      const result = await this.service.deleteDashboard(id, user.id, companyId, reason);
+      const result = await this.service.deleteDashboard(id, userId, companyId, reason);
       return sendDeleted(res, 'Dashboard deleted successfully');
     } catch (error) {
       logger.error('Delete dashboard error:', error);
@@ -300,8 +405,15 @@ class DashboardController extends BaseController {
 
   async getStats(req, res) {
     try {
-      const { user, companyId } = req;
-      const result = await this.service.getDashboardStats(user.id, companyId);
+      // ✅ استخدام companyId من الـ Body أو من الـ Auth
+      const companyId = req.body.companyId || req.companyId || req.query.companyId;
+      const userId = req.user.id;
+
+      if (!companyId || !userId) {
+        return sendUnauthorized(res, 'Unauthorized: user/company context missing from request');
+      }
+
+      const result = await this.service.getDashboardStats(userId, companyId);
       return sendResponse(res, 200, 'Dashboard statistics retrieved successfully', result);
     } catch (error) {
       logger.error('Get dashboard stats error:', error);
@@ -313,10 +425,17 @@ class DashboardController extends BaseController {
 
   async export(req, res) {
     try {
-      const { user, companyId } = req;
+      // ✅ استخدام companyId من الـ Body أو من الـ Auth
+      const companyId = req.body.companyId || req.companyId || req.query.companyId;
+      const userId = req.user.id;
+
+      if (!companyId || !userId) {
+        return sendUnauthorized(res, 'Unauthorized: user/company context missing from request');
+      }
+
       const { format = 'json' } = req.query;
       
-      const data = await this.service.exportDashboards(user.id, companyId, format);
+      const data = await this.service.exportDashboards(userId, companyId, format);
       
       if (format === 'csv') {
         res.setHeader('Content-Type', 'text/csv');

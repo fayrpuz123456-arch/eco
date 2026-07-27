@@ -1,7 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const Department = require('../models/Department.model');
-const { authMiddleware } = require('../../../core/middleware/auth'); // ✅ استيراد authMiddleware
+const { authMiddleware } = require('../../../core/middleware/auth');
+const logger = require('../../../core/utils/logger');
 
 // ============================================================
 // ✅ تطبيق authMiddleware على جميع راوتات الـ Department
@@ -13,7 +14,6 @@ router.use(authMiddleware);
 // ============================================================
 router.get('/', async (req, res) => {
   try {
-    // ✅ استخدام req.companyId (من authMiddleware)
     const companyId = req.companyId;
     
     if (!companyId) {
@@ -23,25 +23,20 @@ router.get('/', async (req, res) => {
       });
     }
 
-    // ===== بناء فلتر البحث =====
     const filter = { companyId, deletedAt: null };
     
-    // فلتر حسب المصنع
     if (req.query.factoryId) {
       filter.factoryId = req.query.factoryId;
     }
     
-    // فلتر حسب النوع
     if (req.query.type) {
       filter.type = req.query.type;
     }
     
-    // فلتر حسب الحالة
     if (req.query.status) {
       filter.status = req.query.status;
     }
     
-    // فلتر حسب البحث
     if (req.query.search) {
       const searchRegex = new RegExp(req.query.search, 'i');
       filter.$or = [
@@ -51,17 +46,14 @@ router.get('/', async (req, res) => {
       ];
     }
 
-    // ===== Pagination =====
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 20;
     const skip = (page - 1) * limit;
     
-    // ===== Sorting =====
     const sortField = req.query.sortBy || 'name';
     const sortOrder = req.query.sortOrder === 'desc' ? -1 : 1;
     const sort = { [sortField]: sortOrder };
 
-    // ===== تنفيذ الاستعلام =====
     const [departments, total] = await Promise.all([
       Department.find(filter)
         .select('-__v')
@@ -85,11 +77,11 @@ router.get('/', async (req, res) => {
       count: departments.length
     });
   } catch (error) {
-    console.error('❌ Error fetching departments:', error);
+    logger.error('GET /departments error:', error);
     res.status(500).json({
       success: false,
       message: 'Error fetching departments',
-      error: error.message
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
 });
@@ -122,11 +114,11 @@ router.get('/stats', async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('❌ Error fetching department stats:', error);
+    logger.error('GET /departments/stats error:', error);
     res.status(500).json({
       success: false,
       message: 'Error fetching department statistics',
-      error: error.message
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
 });
@@ -157,11 +149,11 @@ router.get('/factory/:factoryId', async (req, res) => {
       count: departments.length
     });
   } catch (error) {
-    console.error('❌ Error fetching departments by factory:', error);
+    logger.error('GET /departments/factory/:factoryId error:', error);
     res.status(500).json({
       success: false,
       message: 'Error fetching departments',
-      error: error.message
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
 });
@@ -194,11 +186,11 @@ router.get('/type/:type', async (req, res) => {
       count: departments.length
     });
   } catch (error) {
-    console.error('❌ Error fetching departments by type:', error);
+    logger.error('GET /departments/type/:type error:', error);
     res.status(500).json({
       success: false,
       message: 'Error fetching departments',
-      error: error.message
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
 });
@@ -227,11 +219,11 @@ router.get('/active', async (req, res) => {
       count: departments.length
     });
   } catch (error) {
-    console.error('❌ Error fetching active departments:', error);
+    logger.error('GET /departments/active error:', error);
     res.status(500).json({
       success: false,
       message: 'Error fetching departments',
-      error: error.message
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
 });
@@ -269,11 +261,11 @@ router.get('/:id', async (req, res) => {
       data: department
     });
   } catch (error) {
-    console.error('❌ Error fetching department:', error);
+    logger.error('GET /departments/:id error:', error);
     res.status(500).json({
       success: false,
       message: 'Error fetching department',
-      error: error.message
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
 });
@@ -306,11 +298,11 @@ router.get('/search/:term', async (req, res) => {
       count: departments.length
     });
   } catch (error) {
-    console.error('❌ Error searching departments:', error);
+    logger.error('GET /departments/search/:term error:', error);
     res.status(500).json({
       success: false,
       message: 'Error searching departments',
-      error: error.message
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
 });
@@ -320,9 +312,10 @@ router.get('/search/:term', async (req, res) => {
 // ============================================================
 router.post('/', async (req, res) => {
   try {
-    // ✅ استخدام req.companyId و req.user.id (من authMiddleware)
-    const companyId = req.companyId;
     const userId = req.user.id;
+
+    // ✅ استخدم companyId من الـ Body لو موجود، وإلا استخدم من الـ Request
+    const companyId = req.body.companyId || req.companyId;
 
     if (!companyId || !userId) {
       return res.status(401).json({
@@ -331,9 +324,16 @@ router.post('/', async (req, res) => {
       });
     }
 
+    // ✅ التحقق من صحة companyId
+    if (!companyId.startsWith('comp_')) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid company ID format. Must start with "comp_"'
+      });
+    }
+
     const { name, code, factoryId, description, type } = req.body;
 
-    // ===== التحقق من الحقول المطلوبة =====
     if (!name || !code || !factoryId) {
       return res.status(400).json({
         success: false,
@@ -341,7 +341,6 @@ router.post('/', async (req, res) => {
       });
     }
 
-    // ===== التحقق من التكرار =====
     const existingDepartment = await Department.findOne({
       code: code.toUpperCase(),
       factoryId,
@@ -356,7 +355,6 @@ router.post('/', async (req, res) => {
       });
     }
 
-    // ===== إنشاء القسم =====
     const newDepartment = new Department({
       name: name.trim(),
       code: code.toUpperCase().trim(),
@@ -377,11 +375,11 @@ router.post('/', async (req, res) => {
       data: savedDepartment
     });
   } catch (error) {
-    console.error('❌ Error creating department:', error);
+    logger.error('POST /departments error:', error);
     res.status(500).json({
       success: false,
       message: 'Error creating department',
-      error: error.message
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
 });
@@ -403,7 +401,6 @@ router.put('/:id', async (req, res) => {
 
     const { name, type, description, status } = req.body;
 
-    // ===== البحث عن القسم =====
     const department = await Department.findOne({
       _id: req.params.id,
       companyId,
@@ -417,7 +414,6 @@ router.put('/:id', async (req, res) => {
       });
     }
 
-    // ===== تحديث الحقول =====
     if (name) department.name = name.trim();
     if (type) department.type = type;
     if (description !== undefined) department.description = description ? description.trim() : null;
@@ -434,11 +430,11 @@ router.put('/:id', async (req, res) => {
       data: updatedDepartment
     });
   } catch (error) {
-    console.error('❌ Error updating department:', error);
+    logger.error('PUT /departments/:id error:', error);
     res.status(500).json({
       success: false,
       message: 'Error updating department',
-      error: error.message
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
 });
@@ -464,7 +460,6 @@ router.patch('/:id', async (req, res) => {
     delete updates.createdAt;
     delete updates.createdBy;
 
-    // ===== البحث عن القسم =====
     const department = await Department.findOne({
       _id: req.params.id,
       companyId,
@@ -478,7 +473,6 @@ router.patch('/:id', async (req, res) => {
       });
     }
 
-    // ===== تطبيق التحديثات =====
     Object.keys(updates).forEach(key => {
       if (key === 'name') updates[key] = updates[key].trim();
       if (key === 'code') updates[key] = updates[key].toUpperCase().trim();
@@ -497,11 +491,11 @@ router.patch('/:id', async (req, res) => {
       data: updatedDepartment
     });
   } catch (error) {
-    console.error('❌ Error updating department:', error);
+    logger.error('PATCH /departments/:id error:', error);
     res.status(500).json({
       success: false,
       message: 'Error updating department',
-      error: error.message
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
 });
@@ -521,7 +515,6 @@ router.delete('/:id', async (req, res) => {
       });
     }
 
-    // ===== البحث عن القسم =====
     const department = await Department.findOne({
       _id: req.params.id,
       companyId,
@@ -535,7 +528,6 @@ router.delete('/:id', async (req, res) => {
       });
     }
 
-    // ===== Soft Delete =====
     department.deletedAt = new Date();
     department.deletedBy = userId;
     department.status = 'archived';
@@ -551,11 +543,11 @@ router.delete('/:id', async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('❌ Error deleting department:', error);
+    logger.error('DELETE /departments/:id error:', error);
     res.status(500).json({
       success: false,
       message: 'Error deleting department',
-      error: error.message
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
 });
@@ -575,7 +567,6 @@ router.delete('/:id/permanent', async (req, res) => {
       });
     }
 
-    // ✅ فقط admin أو super_admin يمكنهم الحذف الدائم
     if (userRole !== 'admin' && userRole !== 'super_admin') {
       return res.status(403).json({
         success: false,
@@ -583,7 +574,6 @@ router.delete('/:id/permanent', async (req, res) => {
       });
     }
 
-    // ===== البحث عن القسم =====
     const department = await Department.findOne({
       _id: req.params.id,
       companyId
@@ -596,7 +586,6 @@ router.delete('/:id/permanent', async (req, res) => {
       });
     }
 
-    // ===== حذف دائم =====
     await department.deleteOne();
 
     res.json({
@@ -608,11 +597,11 @@ router.delete('/:id/permanent', async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('❌ Error permanently deleting department:', error);
+    logger.error('DELETE /departments/:id/permanent error:', error);
     res.status(500).json({
       success: false,
       message: 'Error permanently deleting department',
-      error: error.message
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
 });
@@ -633,7 +622,6 @@ router.post('/:id/restore', async (req, res) => {
       });
     }
 
-    // ✅ فقط admin أو super_admin يمكنهم الاستعادة
     if (userRole !== 'admin' && userRole !== 'super_admin') {
       return res.status(403).json({
         success: false,
@@ -641,7 +629,6 @@ router.post('/:id/restore', async (req, res) => {
       });
     }
 
-    // ===== البحث عن القسم المحذوف =====
     const department = await Department.findOne({
       _id: req.params.id,
       companyId,
@@ -655,7 +642,6 @@ router.post('/:id/restore', async (req, res) => {
       });
     }
 
-    // ===== استعادة القسم =====
     department.deletedAt = null;
     department.deletedBy = null;
     department.deletedReason = null;
@@ -671,11 +657,11 @@ router.post('/:id/restore', async (req, res) => {
       data: restoredDepartment
     });
   } catch (error) {
-    console.error('❌ Error restoring department:', error);
+    logger.error('POST /departments/:id/restore error:', error);
     res.status(500).json({
       success: false,
       message: 'Error restoring department',
-      error: error.message
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
 });
@@ -712,7 +698,6 @@ router.put('/:id/status', async (req, res) => {
       });
     }
 
-    // ===== البحث عن القسم =====
     const department = await Department.findOne({
       _id: req.params.id,
       companyId,
@@ -738,11 +723,11 @@ router.put('/:id/status', async (req, res) => {
       data: updatedDepartment
     });
   } catch (error) {
-    console.error('❌ Error updating department status:', error);
+    logger.error('PUT /departments/:id/status error:', error);
     res.status(500).json({
       success: false,
       message: 'Error updating department status',
-      error: error.message
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
 });
@@ -771,7 +756,6 @@ router.post('/batch/delete', async (req, res) => {
       });
     }
 
-    // ===== البحث عن الأقسام =====
     const departments = await Department.find({
       _id: { $in: departmentIds },
       companyId,
@@ -785,7 +769,6 @@ router.post('/batch/delete', async (req, res) => {
       });
     }
 
-    // ===== حذف جميع الأقسام =====
     const results = [];
     for (const department of departments) {
       department.deletedAt = new Date();
@@ -805,11 +788,11 @@ router.post('/batch/delete', async (req, res) => {
       data: results
     });
   } catch (error) {
-    console.error('❌ Error batch deleting departments:', error);
+    logger.error('POST /departments/batch/delete error:', error);
     res.status(500).json({
       success: false,
       message: 'Error deleting departments',
-      error: error.message
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
 });
@@ -845,7 +828,6 @@ router.post('/batch/update', async (req, res) => {
       });
     }
 
-    // ===== البحث عن الأقسام =====
     const departments = await Department.find({
       _id: { $in: departmentIds },
       companyId,
@@ -859,7 +841,6 @@ router.post('/batch/update', async (req, res) => {
       });
     }
 
-    // ===== تحديث جميع الأقسام =====
     const results = [];
     for (const department of departments) {
       Object.keys(updates).forEach(key => {
@@ -884,11 +865,11 @@ router.post('/batch/update', async (req, res) => {
       data: results
     });
   } catch (error) {
-    console.error('❌ Error batch updating departments:', error);
+    logger.error('POST /departments/batch/update error:', error);
     res.status(500).json({
       success: false,
       message: 'Error updating departments',
-      error: error.message
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
 });

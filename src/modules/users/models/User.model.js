@@ -1,18 +1,23 @@
 const mongoose = require('mongoose');
-const BaseModel = require('../../../core/base/BaseModel');
+const { v4: uuidv4 } = require('uuid');
 
 // ============ USER SCHEMA ============
 
-// استخدام BaseModel لإضافة الحقول الأساسية (companyId, deletedAt, createdBy, updatedBy, status, metadata)
-// ولكننا نحتفظ بالحقول المخصصة لأن User Model معقد
 const userSchema = new mongoose.Schema({
-  // ===== Base Fields (من BaseModel) =====
-  // companyId, createdBy, updatedBy, createdAt, updatedAt, deletedAt, status, metadata
-  // تم تعريفها يدوياً هنا للحفاظ على التحكم الكامل
-
-  companyId: { type: String, required: true, default: 'comp_test_001' },
-  createdBy: { type: String },
-  updatedBy: { type: String },
+  // ===== Base Fields =====
+  companyId: { 
+    type: String, 
+    required: true,
+    index: true,
+    validate: {
+      validator: function(v) {
+        return v && v.startsWith('comp_');
+      },
+      message: 'Company ID must start with "comp_"'
+    }
+  },
+  createdBy: { type: String, default: null },
+  updatedBy: { type: String, default: null },
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now },
   deletedAt: { type: Date, default: null },
@@ -68,7 +73,8 @@ const userSchema = new mongoose.Schema({
   firebaseUid: {
     type: String,
     required: true,
-    default: () => `firebase_${Date.now()}`
+    unique: true,
+    default: () => `firebase_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
   },
   emailVerified: {
     type: Boolean,
@@ -211,13 +217,13 @@ const userSchema = new mongoose.Schema({
     default: {}
   },
 
-  // ===== Metadata (من BaseModel) =====
+  // ===== Metadata =====
   metadata: {
     type: mongoose.Schema.Types.Mixed,
     default: {}
   },
 
-  // ===== Soft Delete (من BaseModel) =====
+  // ===== Soft Delete =====
   deletedBy: {
     type: String,
     default: null
@@ -246,9 +252,8 @@ const userSchema = new mongoose.Schema({
 });
 
 // ============ INDEXES ============
-// ✅ كل فهرس معرف مرة واحدة فقط
 
-// ✅ فهارس بسيطة للبحث
+// فهارس للبحث
 userSchema.index({ companyId: 1 });
 userSchema.index({ role: 1 });
 userSchema.index({ status: 1 });
@@ -257,13 +262,11 @@ userSchema.index({ departmentIds: 1 });
 userSchema.index({ 'preferences.language': 1 });
 userSchema.index({ createdAt: -1 });
 userSchema.index({ lastLogin: -1 });
+userSchema.index({ deletedAt: 1 }, { sparse: true });
 
-// ✅ فهارس فريدة (Unique)
+// فهارس فريدة
 userSchema.index({ email: 1, companyId: 1 }, { unique: true });
 userSchema.index({ firebaseUid: 1 }, { unique: true });
-
-// ✅ فهرس Soft Delete
-userSchema.index({ deletedAt: 1 }, { sparse: true });
 
 // ============ VIRTUALS ============
 
@@ -286,15 +289,29 @@ userSchema.virtual('isTwoFactorEnabled').get(function() {
   return this.twoFactorEnabled;
 });
 
-// ============ PRE-SAVE MIDDLEWARE ============
-// ✅ تم التعليق لأن BaseModel يوفر Pre-save middleware
-// تجنباً لتكرار Pre-save hooks
+userSchema.virtual('isVerified').get(function() {
+  return this.emailVerified;
+});
 
-/*
+userSchema.virtual('isSuspended').get(function() {
+  return this.status === 'suspended';
+});
+
+userSchema.virtual('isArchived').get(function() {
+  return this.status === 'archived';
+});
+
+userSchema.virtual('displayNameWithEmail').get(function() {
+  return `${this.displayName} (${this.email})`;
+});
+
+// ============ PRE-SAVE MIDDLEWARE ============
+
 userSchema.pre('save', function(next) {
   try {
     this.updatedAt = new Date();
     
+    // تحديث displayName تلقائياً من firstName + lastName
     if (this.isModified('firstName') || this.isModified('lastName')) {
       if (this.firstName && this.lastName) {
         this.displayName = `${this.firstName} ${this.lastName}`;
@@ -305,29 +322,39 @@ userSchema.pre('save', function(next) {
       }
     }
     
+    // تنظيف البريد الإلكتروني
     if (this.isModified('email') && this.email) {
       this.email = this.email.toLowerCase().trim();
     }
     
+    // تنظيف رقم الهاتف
+    if (this.isModified('phoneNumber') && this.phoneNumber) {
+      this.phoneNumber = this.phoneNumber.trim();
+    }
+    
+    // توليد firebaseUid إذا لم يكن موجوداً
     if (!this.firebaseUid || this.firebaseUid === '') {
       this.firebaseUid = `firebase_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     }
     
+    // إعادة تعيين محاولات تسجيل الدخول الفاشلة عند إلغاء القفل
     if (this.isModified('lockedUntil') && !this.lockedUntil) {
       this.failedLoginAttempts = 0;
     }
     
-    return next();
+    // التحقق من صحة companyId
+    if (this.companyId && !this.companyId.startsWith('comp_')) {
+      return next(new Error('Company ID must start with "comp_"'));
+    }
+    
+    next();
   } catch (error) {
-    return next(error);
+    next(error);
   }
 });
-*/
 
 // ============ PRE-VALIDATE MIDDLEWARE ============
-// ✅ تم التعليق لأن BaseModel يوفر Pre-validate
 
-/*
 userSchema.pre('validate', function(next) {
   try {
     if (this.email) {
@@ -346,59 +373,70 @@ userSchema.pre('validate', function(next) {
       this.lastName = this.lastName.trim();
     }
     
-    return next();
+    if (this.phoneNumber) {
+      this.phoneNumber = this.phoneNumber.trim();
+    }
+    
+    if (this.bio) {
+      this.bio = this.bio.trim();
+    }
+    
+    // التحقق من أن البريد الإلكتروني صحيح
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (this.email && !emailRegex.test(this.email)) {
+      return next(new Error('Invalid email format'));
+    }
+    
+    // التحقق من أن displayName ليس فارغاً
+    if (this.displayName && this.displayName.length < 2) {
+      return next(new Error('Display name must be at least 2 characters'));
+    }
+    
+    next();
   } catch (error) {
-    return next(error);
+    next(error);
   }
 });
-*/
 
 // ============ PRE-FINDONEANDUPDATE MIDDLEWARE ============
-// ✅ تم التعليق لأن BaseModel يوفر Pre-findOneAndUpdate
 
-/*
 userSchema.pre('findOneAndUpdate', function(next) {
   try {
     this.set({ updatedAt: new Date() });
-    return next();
+    next();
   } catch (error) {
-    return next(error);
+    next(error);
   }
 });
-*/
 
 // ============ PRE-UPDATEONE MIDDLEWARE ============
-// ✅ تم التعليق لأن BaseModel يوفر Pre-updateOne
 
-/*
 userSchema.pre('updateOne', function(next) {
   try {
     this.set({ updatedAt: new Date() });
-    return next();
+    next();
   } catch (error) {
-    return next(error);
+    next(error);
   }
 });
-*/
 
 // ============ PRE-UPDATEMANY MIDDLEWARE ============
-// ✅ تم التعليق لأن BaseModel يوفر Pre-updateMany
 
-/*
 userSchema.pre('updateMany', function(next) {
   try {
     this.set({ updatedAt: new Date() });
-    return next();
+    next();
   } catch (error) {
-    return next(error);
+    next(error);
   }
 });
-*/
 
 // ============ POST-SAVE MIDDLEWARE ============
 
 userSchema.post('save', function(doc) {
-  console.log('✅ User saved successfully:', doc._id);
+  if (process.env.NODE_ENV !== 'production') {
+    console.log('✅ User saved successfully:', doc._id);
+  }
 });
 
 userSchema.post('save', function(error, doc, next) {
@@ -411,13 +449,16 @@ userSchema.post('save', function(error, doc, next) {
 // ============ POST-FINDONEANDUPDATE MIDDLEWARE ============
 
 userSchema.post('findOneAndUpdate', function(doc) {
-  if (doc) {
+  if (doc && process.env.NODE_ENV !== 'production') {
     console.log('✅ User updated successfully:', doc._id);
   }
 });
 
 // ============ METHODS ============
 
+/**
+ * تسجيل دخول المستخدم
+ */
 userSchema.methods.recordLogin = async function(ip, userAgent, deviceInfo = {}) {
   this.lastLogin = new Date();
   this.lastIP = ip;
@@ -427,7 +468,7 @@ userSchema.methods.recordLogin = async function(ip, userAgent, deviceInfo = {}) 
   this.failedLoginAttempts = 0;
   this.lockedUntil = null;
 
-  if (deviceInfo) {
+  if (deviceInfo && Object.keys(deviceInfo).length > 0) {
     this.deviceInfo = {
       ...this.deviceInfo,
       [ip]: {
@@ -441,17 +482,28 @@ userSchema.methods.recordLogin = async function(ip, userAgent, deviceInfo = {}) 
   return this.save();
 };
 
+/**
+ * تسجيل خروج المستخدم
+ */
 userSchema.methods.recordLogout = async function() {
   this.lastLogout = new Date();
   return this.save();
 };
 
+/**
+ * تحديث آخر نشاط
+ */
 userSchema.methods.updateLastActive = async function() {
   this.lastActive = new Date();
   return this.save();
 };
 
+/**
+ * إضافة توكن جلسة
+ */
 userSchema.methods.addSessionToken = function(token) {
+  if (!token) return this;
+  
   if (!this.sessionTokens.includes(token)) {
     this.sessionTokens.push(token);
     if (this.sessionTokens.length > 10) {
@@ -461,17 +513,29 @@ userSchema.methods.addSessionToken = function(token) {
   return this.save();
 };
 
+/**
+ * إزالة توكن جلسة
+ */
 userSchema.methods.removeSessionToken = function(token) {
+  if (!token) return this;
   this.sessionTokens = this.sessionTokens.filter(t => t !== token);
   return this.save();
 };
 
+/**
+ * إبطال جميع الجلسات
+ */
 userSchema.methods.revokeAllSessions = function() {
   this.sessionTokens = [];
   return this.save();
 };
 
+/**
+ * التحقق من وجود صلاحية معينة
+ */
 userSchema.methods.hasPermission = function(permission) {
+  if (!permission) return true;
+  
   if (this.role === 'super_admin') return true;
 
   if (this.role === 'admin') {
@@ -485,15 +549,27 @@ userSchema.methods.hasPermission = function(permission) {
   return this.permissions.includes(permission);
 };
 
+/**
+ * التحقق من وجود جميع الصلاحيات المطلوبة
+ */
 userSchema.methods.hasAllPermissions = function(permissions) {
+  if (!permissions || permissions.length === 0) return true;
   return permissions.every(p => this.hasPermission(p));
 };
 
+/**
+ * التحقق من وجود أي صلاحية من المطلوبة
+ */
 userSchema.methods.hasAnyPermission = function(permissions) {
+  if (!permissions || permissions.length === 0) return true;
   return permissions.some(p => this.hasPermission(p));
 };
 
+/**
+ * التحقق من الدور
+ */
 userSchema.methods.hasRole = function(role) {
+  if (!role) return true;
   if (this.role === 'super_admin') return true;
   if (Array.isArray(role)) {
     return role.includes(this.role);
@@ -501,16 +577,27 @@ userSchema.methods.hasRole = function(role) {
   return this.role === role;
 };
 
+/**
+ * التحقق من الوصول للمصنع
+ */
 userSchema.methods.hasFactoryAccess = function(factoryId) {
+  if (!factoryId) return true;
   if (this.role === 'super_admin' || this.role === 'admin') return true;
   return this.factoryIds.includes(factoryId);
 };
 
+/**
+ * التحقق من الوصول للقسم
+ */
 userSchema.methods.hasDepartmentAccess = function(departmentId) {
+  if (!departmentId) return true;
   if (this.role === 'super_admin' || this.role === 'admin') return true;
   return this.departmentIds.includes(departmentId);
 };
 
+/**
+ * تسجيل محاولة تسجيل دخول فاشلة
+ */
 userSchema.methods.recordFailedLogin = async function() {
   this.failedLoginAttempts += 1;
 
@@ -521,13 +608,21 @@ userSchema.methods.recordFailedLogin = async function() {
   return this.save();
 };
 
+/**
+ * إعادة تعيين محاولات تسجيل الدخول الفاشلة
+ */
 userSchema.methods.resetFailedLoginAttempts = function() {
   this.failedLoginAttempts = 0;
   this.lockedUntil = null;
   return this.save();
 };
 
+/**
+ * تغيير كلمة المرور
+ */
 userSchema.methods.changePassword = async function(newPasswordHash) {
+  if (!newPasswordHash) return this;
+  
   if (this.passwordHistory.length >= 5) {
     this.passwordHistory.shift();
   }
@@ -536,7 +631,11 @@ userSchema.methods.changePassword = async function(newPasswordHash) {
   return this.save();
 };
 
+/**
+ * التحقق من إمكانية إدارة مستخدم آخر
+ */
 userSchema.methods.canManageUser = function(targetUser) {
+  if (!targetUser) return false;
   if (this.role === 'super_admin') return true;
 
   if (this.role === 'admin') {
@@ -552,13 +651,19 @@ userSchema.methods.canManageUser = function(targetUser) {
   return this.id === targetUser.id;
 };
 
+/**
+ * الحصول على الاسم الكامل
+ */
 userSchema.methods.getFullName = function() {
   if (this.firstName && this.lastName) {
     return `${this.firstName} ${this.lastName}`;
   }
-  return this.displayName;
+  return this.displayName || this.email || 'User';
 };
 
+/**
+ * البيانات العامة للـ API
+ */
 userSchema.methods.toPublicJSON = function() {
   return {
     id: this._id,
@@ -581,6 +686,9 @@ userSchema.methods.toPublicJSON = function() {
   };
 };
 
+/**
+ * البيانات الكاملة للإدارة
+ */
 userSchema.methods.toAdminJSON = function() {
   return {
     ...this.toPublicJSON(),
@@ -601,7 +709,12 @@ userSchema.methods.toAdminJSON = function() {
 
 // ============ STATIC METHODS ============
 
+/**
+ * البحث عن مستخدم بالإيميل
+ */
 userSchema.statics.findByEmail = function(email, companyId) {
+  if (!email) return null;
+  
   const query = { email: email.toLowerCase(), deletedAt: null };
   if (companyId) {
     query.companyId = companyId;
@@ -609,11 +722,20 @@ userSchema.statics.findByEmail = function(email, companyId) {
   return this.findOne(query);
 };
 
+/**
+ * البحث عن مستخدم بـ Firebase UID
+ */
 userSchema.statics.findByFirebaseUid = function(firebaseUid) {
+  if (!firebaseUid) return null;
   return this.findOne({ firebaseUid, deletedAt: null });
 };
 
+/**
+ * البحث عن مستخدمين حسب الدور
+ */
 userSchema.statics.findByRole = function(role, companyId) {
+  if (!role) return [];
+  
   const query = { role, deletedAt: null };
   if (companyId) {
     query.companyId = companyId;
@@ -621,6 +743,9 @@ userSchema.statics.findByRole = function(role, companyId) {
   return this.find(query);
 };
 
+/**
+ * البحث عن مستخدمين نشطين
+ */
 userSchema.statics.findActive = function(companyId) {
   const query = { status: 'active', deletedAt: null };
   if (companyId) {
@@ -629,7 +754,12 @@ userSchema.statics.findActive = function(companyId) {
   return this.find(query);
 };
 
+/**
+ * البحث عن مستخدمين حسب المصنع
+ */
 userSchema.statics.findByFactory = function(factoryId, companyId) {
+  if (!factoryId) return [];
+  
   const query = {
     factoryIds: factoryId,
     deletedAt: null
@@ -640,7 +770,12 @@ userSchema.statics.findByFactory = function(factoryId, companyId) {
   return this.find(query);
 };
 
+/**
+ * البحث عن مستخدمين حسب القسم
+ */
 userSchema.statics.findByDepartment = function(departmentId, companyId) {
+  if (!departmentId) return [];
+  
   const query = {
     departmentIds: departmentId,
     deletedAt: null
@@ -651,7 +786,12 @@ userSchema.statics.findByDepartment = function(departmentId, companyId) {
   return this.find(query);
 };
 
+/**
+ * البحث عن مستخدمين حسب الصلاحية
+ */
 userSchema.statics.findByPermission = function(permission, companyId) {
+  if (!permission) return [];
+  
   const query = {
     deletedAt: null,
     $or: [
@@ -666,7 +806,12 @@ userSchema.statics.findByPermission = function(permission, companyId) {
   return this.find(query);
 };
 
+/**
+ * البحث النصي
+ */
 userSchema.statics.search = function(searchTerm, companyId) {
+  if (!searchTerm || searchTerm.length < 2) return [];
+  
   const searchRegex = new RegExp(searchTerm, 'i');
   const query = {
     deletedAt: null,
@@ -681,9 +826,12 @@ userSchema.statics.search = function(searchTerm, companyId) {
   if (companyId) {
     query.companyId = companyId;
   }
-  return this.find(query);
+  return this.find(query).limit(50);
 };
 
+/**
+ * الحصول على إحصائيات المستخدمين
+ */
 userSchema.statics.getStats = async function(companyId) {
   const match = { deletedAt: null };
   if (companyId) {
@@ -732,6 +880,41 @@ userSchema.statics.getStats = async function(companyId) {
     twoFactor: 0,
     activeToday: 0
   };
+};
+
+/**
+ * الحصول على المستخدمين الذين لم يسجلوا دخول منذ فترة
+ */
+userSchema.statics.findInactiveSince = async function(days, companyId) {
+  if (!days || days < 1) return [];
+  
+  const cutoffDate = new Date();
+  cutoffDate.setDate(cutoffDate.getDate() - days);
+
+  const query = {
+    lastLogin: { $lt: cutoffDate },
+    deletedAt: null,
+    status: 'active'
+  };
+  if (companyId) {
+    query.companyId = companyId;
+  }
+  return this.find(query);
+};
+
+/**
+ * الحصول على المستخدمين الذين لديهم جلسات نشطة
+ */
+userSchema.statics.findWithActiveSessions = async function(companyId) {
+  const query = {
+    sessionTokens: { $exists: true, $ne: [] },
+    deletedAt: null,
+    status: 'active'
+  };
+  if (companyId) {
+    query.companyId = companyId;
+  }
+  return this.find(query);
 };
 
 // ============ EXPORT ============

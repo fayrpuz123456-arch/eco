@@ -22,8 +22,9 @@ const createProductionLineSchema = Joi.object({
   category: Joi.string().valid('manual', 'semi_automated', 'fully_automated', 'robotic', 'hybrid')
     .default('semi_automated'),
   priority: Joi.string().valid('low', 'medium', 'high', 'critical').default('medium'),
-  departmentId: Joi.string().required(), // ✅ تم إزالة uuid validation
-  factoryId: Joi.string().required(), // ✅ تم إزالة uuid validation
+  departmentId: Joi.string().required(),
+  factoryId: Joi.string().required(),
+  companyId: Joi.string().optional(), // ✅ إضافة companyId كاختياري
   tags: Joi.array().items(Joi.string()).default([])
 });
 
@@ -56,14 +57,14 @@ const updateMachinesSchema = Joi.object({
   idle: Joi.number().min(0).optional(),
   maintenance: Joi.number().min(0).optional(),
   offline: Joi.number().min(0).optional(),
-  machineIds: Joi.array().items(Joi.string()).optional() // ✅ تم إزالة uuid validation
+  machineIds: Joi.array().items(Joi.string()).optional()
 });
 
 const updateSensorsSchema = Joi.object({
   total: Joi.number().min(0).optional(),
   active: Joi.number().min(0).optional(),
   offline: Joi.number().min(0).optional(),
-  sensorIds: Joi.array().items(Joi.string()).optional() // ✅ تم إزالة uuid validation
+  sensorIds: Joi.array().items(Joi.string()).optional()
 });
 
 const updateQualitySchema = Joi.object({
@@ -98,7 +99,7 @@ const filterSchema = Joi.object({
   ),
   category: Joi.string().valid('manual', 'semi_automated', 'fully_automated', 'robotic', 'hybrid'),
   priority: Joi.string().valid('low', 'medium', 'high', 'critical'),
-  departmentId: Joi.string(), // ✅ تم إزالة uuid validation
+  departmentId: Joi.string(),
   minOEE: Joi.number().min(0).max(100),
   maxOEE: Joi.number().min(0).max(100),
   minGreenScore: Joi.number().min(0).max(100),
@@ -155,7 +156,7 @@ router.get(
  */
 router.get(
   '/department/:departmentId',
-  validate(Joi.object({ departmentId: Joi.string().required() }), 'params'), // ✅ تم إزالة uuid validation
+  validate(Joi.object({ departmentId: Joi.string().required() }), 'params'),
   checkPermissions([PERMISSIONS.PRODUCTION_LINES_VIEW]),
   controller.getByDepartment.bind(controller)
 );
@@ -227,7 +228,7 @@ router.get(
  */
 router.get(
   '/factory/:factoryId',
-  validate(Joi.object({ factoryId: Joi.string().required() }), 'params'), // ✅ تم إزالة uuid validation
+  validate(Joi.object({ factoryId: Joi.string().required() }), 'params'),
   checkPermissions([PERMISSIONS.PRODUCTION_LINES_VIEW]),
   controller.getByFactory.bind(controller)
 );

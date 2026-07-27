@@ -2,7 +2,7 @@ const firebaseService = require('../../config/firebase');
 const { sendError, sendUnauthorized } = require('../utils/response');
 const logger = require('../utils/logger');
 const { UnauthorizedError, ForbiddenError } = require('./errorHandler');
-const User = require('../../modules/users/models/User.model'); // ✅ استيراد User Model
+const User = require('../../modules/users/models/User.model');
 
 // ============ MAIN AUTH MIDDLEWARE ============
 
@@ -41,7 +41,7 @@ const authMiddleware = async (req, res, next) => {
       // 4. الحصول على معلومات المستخدم من Firebase
       const firebaseUser = await firebaseService.getUser(decodedToken.uid);
       
-      // 🔥 **الجديد: جيب المستخدم من MongoDB**
+      // جيب المستخدم من MongoDB
       let userFromDB = null;
       try {
         userFromDB = await User.findOne({ firebaseUid: decodedToken.uid });
@@ -49,9 +49,14 @@ const authMiddleware = async (req, res, next) => {
         logger.warn('Could not fetch user from MongoDB:', dbError.message);
       }
 
-      // ✅ **لو المستخدم مش موجود في MongoDB، أنشئه تلقائياً**
+      // لو المستخدم مش موجود في MongoDB، أنشئه تلقائياً
       if (!userFromDB) {
         try {
+          // ✅ توليد companyId ديناميكياً من الـ Request
+          const companyId = req.headers['x-company-id'] || 
+                           decodedToken.claims?.companyId || 
+                           `comp_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+
           const newUser = new User({
             email: firebaseUser.email,
             displayName: firebaseUser.displayName || firebaseUser.email || 'User',
@@ -59,20 +64,23 @@ const authMiddleware = async (req, res, next) => {
             emailVerified: firebaseUser.emailVerified || false,
             role: 'viewer',
             permissions: [],
-            companyId: req.headers['x-company-id'] || 'comp_test_001',
+            companyId: companyId,
             status: 'active'
           });
           userFromDB = await newUser.save();
           logger.info('✅ User auto-created from Firebase:', { 
             uid: firebaseUser.uid, 
-            email: firebaseUser.email 
+            email: firebaseUser.email,
+            companyId: companyId
           });
         } catch (createError) {
           logger.error('❌ Failed to auto-create user:', createError.message);
+          // ✅ لو فشل الإنشاء، نرمي error بدل ما نكمل ببيانات ناقصة
+          return sendError(res, 500, 'Failed to create user profile. Please contact support.');
         }
       }
 
-      // ✅ **تحديد الـ Role والـ Permissions من MongoDB**
+      // تحديد الـ Role والـ Permissions من MongoDB
       let userRole = 'viewer';
       let userPermissions = [];
 
@@ -80,7 +88,7 @@ const authMiddleware = async (req, res, next) => {
         userRole = userFromDB.role || 'viewer';
         userPermissions = userFromDB.permissions || [];
         
-        // ✅ لو الـ role admin ومفيش permissions، أضفهم تلقائياً
+        // لو الـ role admin ومفيش permissions، أضفهم تلقائياً
         if (userRole === 'admin' && userPermissions.length === 0) {
           userPermissions = ['*'];
           await User.updateOne(
@@ -90,7 +98,7 @@ const authMiddleware = async (req, res, next) => {
           logger.info('✅ Auto-added permissions for admin:', userFromDB.email);
         }
         
-        // ✅ لو super_admin، أضف كل الصلاحيات
+        // لو super_admin، أضف كل الصلاحيات
         if (userRole === 'super_admin') {
           userPermissions = ['*'];
         }
@@ -114,11 +122,21 @@ const authMiddleware = async (req, res, next) => {
         mongoData: userFromDB || null
       };
 
-      // 6. استخراج companyId
-      req.companyId = req.headers['x-company-id'] || 
-                      decodedToken.claims?.companyId || 
-                      userFromDB?.companyId ||
-                      'comp_test_001';
+      // 6. استخراج companyId (بدون fallback ثابت)
+      const companyId = req.headers['x-company-id'] || 
+                        decodedToken.claims?.companyId || 
+                        userFromDB?.companyId;
+
+      // ✅ لو مفيش companyId، نرمي error بدل ما نستخدم ثابت
+      if (!companyId) {
+        logger.error('❌ Company ID not found for user:', {
+          uid: firebaseUser.uid,
+          email: firebaseUser.email
+        });
+        return sendError(res, 400, 'Company ID is required. Please provide x-company-id header or ensure user has a company assigned.');
+      }
+
+      req.companyId = companyId;
 
       // 7. تسجيل نجاح المصادقة
       logger.debug('User authenticated successfully', {
@@ -181,7 +199,7 @@ const optionalAuthMiddleware = async (req, res, next) => {
         const decodedToken = await firebaseService.verifyToken(token);
         const firebaseUser = await firebaseService.getUser(decodedToken.uid);
         
-        // 🔥 جيب المستخدم من MongoDB (اختياري)
+        // جيب المستخدم من MongoDB (اختياري)
         let userFromDB = null;
         try {
           userFromDB = await User.findOne({ firebaseUid: decodedToken.uid });
@@ -189,7 +207,7 @@ const optionalAuthMiddleware = async (req, res, next) => {
           // تجاهل
         }
         
-        // ✅ تحديد الـ Role والـ Permissions
+        // تحديد الـ Role والـ Permissions
         let userRole = 'viewer';
         let userPermissions = [];
         
@@ -215,10 +233,14 @@ const optionalAuthMiddleware = async (req, res, next) => {
           mongoData: userFromDB || null
         };
         
-        req.companyId = req.headers['x-company-id'] || 
-                        decodedToken.claims?.companyId || 
-                        userFromDB?.companyId ||
-                        'comp_test_001';
+        // ✅ بدون fallback ثابت
+        const companyId = req.headers['x-company-id'] || 
+                          decodedToken.claims?.companyId || 
+                          userFromDB?.companyId;
+        
+        if (companyId) {
+          req.companyId = companyId;
+        }
         
         logger.debug('Optional auth: User authenticated', {
           userId: req.user.id,
@@ -259,13 +281,12 @@ const checkPermissions = (requiredPermissions = []) => {
         return next();
       }
 
-      // ✅ الحصول على صلاحيات المستخدم من MongoDB
+      // الحصول على صلاحيات المستخدم من MongoDB
       const userPermissions = req.user.permissions || [];
       const userRole = req.user.role || 'viewer';
 
-      // ✅ التحقق من صلاحيات الإداري (مهم: super_admin و admin)
+      // التحقق من صلاحيات الإداري
       if (userRole === 'super_admin' || userRole === 'admin') {
-        // ✅ لو admin ومطلوب صلاحية معينة، نسمح (admin عنده كل الصلاحيات)
         return next();
       }
 
@@ -311,7 +332,7 @@ const checkRole = (allowedRoles = []) => {
         return sendUnauthorized(res, 'Authentication required.');
       }
 
-      // ✅ الحصول على الدور من MongoDB
+      // الحصول على الدور من MongoDB
       const userRole = req.user.role || 'viewer';
 
       if (allowedRoles.includes(userRole)) {
@@ -361,7 +382,7 @@ const checkCompanyAccess = (getCompanyIdFromParams = true) => {
         return sendError(res, 400, 'Company ID is required.');
       }
 
-      // ✅ الحصول على companyId من MongoDB
+      // الحصول على companyId من MongoDB
       const userCompanyId = req.companyId || req.user.mongoData?.companyId;
       const userRole = req.user.role || 'viewer';
 
@@ -372,7 +393,15 @@ const checkCompanyAccess = (getCompanyIdFromParams = true) => {
       }
 
       // التحقق من أن المستخدم يتبع نفس الشركة
-      if (userCompanyId && userCompanyId !== targetCompanyId) {
+      if (!userCompanyId) {
+        logger.error('❌ User has no company assigned:', {
+          userId: req.user.id,
+          email: req.user.email
+        });
+        return sendError(res, 403, 'User has no company assigned. Please contact administrator.');
+      }
+
+      if (userCompanyId !== targetCompanyId) {
         logger.warn('Company access denied', {
           userId: req.user.id,
           userCompanyId,

@@ -1,5 +1,3 @@
-console.log('🔄 DashboardService.js is being loaded!');
-
 const BaseService = require('../../../core/base/BaseService');
 const DashboardRepository = require('../repositories/DashboardRepository');
 const {
@@ -11,11 +9,8 @@ const {
 const { eventEmitter, EventTypes } = require('../../../core/events/eventEmitter');
 const logger = require('../../../core/utils/logger');
 
-console.log('✅ DashboardService.js loaded successfully!');
-
 class DashboardService extends BaseService {
   constructor() {
-    console.log('🏗️ DashboardService constructor called!');
     super(new DashboardRepository(), 'Dashboard');
     this.repository = this.repository;
   }
@@ -23,7 +18,6 @@ class DashboardService extends BaseService {
   // ============ CREATE ============
 
   async createDashboard(data, userId, companyId) {
-    console.log('📝 createDashboard called');
     try {
       this.validateRequiredFields(data, ['name', 'type']);
 
@@ -70,7 +64,6 @@ class DashboardService extends BaseService {
   // ============ FIND ============
 
   async getDashboardById(id, userId, companyId) {
-    console.log('🔍 getDashboardById called');
     const dashboard = await this.repository.findById(id, companyId);
     if (!dashboard || dashboard.userId !== userId) {
       throw new NotFoundError('Dashboard not found');
@@ -103,47 +96,30 @@ class DashboardService extends BaseService {
     return this.repository.findByUser(userId, companyId);
   }
 
-  // ============================================================
-  // 🛠️ FIX #1 — Total Sensors كانت بترجع 0 لأي Dashboard جديد
-  // ============================================================
-  // السبب الحقيقي: لما مفيش Default Dashboard موجود، الكود القديم كان
-  // بيعمل return مباشر لناتج createDashboard() من غير ما يحسب
-  // الـ metrics ولا الـ widgets خالص، فالـ Response كان بيرجع من غير
-  // Total Sensors أو أي widget أصلاً (مش إن القيمة صفر، القيمة كانت
-  // مش موجودة أساساً). دلوقتي بقينا دايماً نمر على نفس مسار حساب
-  // الـ metrics + الـ widgets سواء الـ Dashboard كان موجود قبل كده
-  // أو اتعمله Create لأول مرة.
   async getDefaultDashboard(userId, companyId) {
-    console.log('🔍 getDefaultDashboard called for userId:', userId);
     let dashboard = await this.repository.findDefault(userId, companyId);
 
     if (!dashboard) {
-      console.log('🆕 No default dashboard, creating one...');
+      // ✅ استخدام اسم المستخدم بدلاً من "My Dashboard" الثابت
+      const user = await this.getUser(userId);
+      const defaultName = user?.displayName 
+        ? `${user.displayName}'s Dashboard` 
+        : 'My Dashboard';
+
       const defaultData = {
-        name: 'My Dashboard',
+        name: defaultName,
         type: 'overview',
         settings: { isDefault: true }
       };
       dashboard = await this.createDashboard(defaultData, userId, companyId);
-      console.log('✅ Dashboard created:', dashboard._id);
     }
 
-    console.log('📊 Dashboard found:', dashboard._id);
-    console.log('📊 Collecting real metrics...');
     const metrics = await this.collectRealMetrics(userId, companyId);
-    console.log('📊 Metrics found:', {
-      totalSensors: metrics.totalSensors,
-      activeAlerts: metrics.activeAlerts,
-      totalFactories: metrics.totalFactories
-    });
-
-    console.log('🎨 Building dynamic widgets...');
     const dynamicWidgets = this.buildDynamicWidgets(metrics);
-    console.log('🎨 Widgets count:', dynamicWidgets.length);
 
     const dashboardObj = dashboard.toObject ? dashboard.toObject() : dashboard;
 
-    const result = {
+    return {
       ...dashboardObj,
       widgets: dynamicWidgets,
       metrics: {
@@ -159,9 +135,6 @@ class DashboardService extends BaseService {
         lastUpdated: new Date().toISOString()
       }
     };
-
-    console.log('✅ Final result - widgets count:', result.widgets.length);
-    return result;
   }
 
   async getDashboardsByType(userId, companyId, type) {
@@ -471,11 +444,6 @@ class DashboardService extends BaseService {
 
   /**
    * بناء الـ Widgets ديناميكياً مع السنسورز الحقيقية
-   *
-   * 🛠️ FIX #3: السنسورز والتنبيهات الحقيقية بترجع مدمجة جوه نفس
-   * لستة الـ widgets اللي بترجع من الداشبورد (كانت موجودة أصلاً)،
-   * وبقينا كمان نمررهم كلهم على sanitizeWidgetData في الآخر عشان
-   * نضمن إن مفيش أي null هيوصل للفرونت إند (FIX #2).
    */
   buildDynamicWidgets(metrics) {
     // KPI Widgets
@@ -562,7 +530,7 @@ class DashboardService extends BaseService {
       }
     ];
 
-    // Sensor Widgets — السنسورز الحقيقية بتتحول مباشرة لـ widget بنفس الـ structure
+    // Sensor Widgets
     const sensorWidgets = (metrics.recentSensors || []).map((sensor, index) => ({
       id: `sensor_${sensor._id || index}`,
       title: sensor.name || `Sensor ${index + 1}`,
@@ -594,14 +562,14 @@ class DashboardService extends BaseService {
 
     const allWidgets = [...kpiWidgets, ...sensorWidgets, ...alertWidgets];
 
-    // 🛠️ FIX #2: كل widget بيعدي على sanitizeWidgetData قبل ما يترجع،
-    // فمفيش أي قيمة null ممكن توصل للفرونت إند وتعمل كراش.
     return allWidgets.map((widget) => this.sanitizeWidgetData(widget));
   }
 
   // ============ 🎨 GET SENSOR ICON ============
 
   getSensorIcon(type) {
+    if (!type) return '📡';
+
     const icons = {
       'temperature': '🌡️',
       'humidity': '💧',
@@ -621,12 +589,14 @@ class DashboardService extends BaseService {
       'rpm': '🔄',
       'default': '📡'
     };
-    return icons[type?.toLowerCase()] || icons.default;
+    return icons[type.toLowerCase()] || icons.default;
   }
 
   // ============ 🎨 GET ALERT ICON ============
 
   getAlertIcon(severity) {
+    if (!severity) return '🔔';
+
     const icons = {
       'critical': '🔴',
       'high': '🟠',
@@ -635,18 +605,11 @@ class DashboardService extends BaseService {
       'info': '🔵',
       'default': '🔔'
     };
-    return icons[severity?.toLowerCase()] || icons.default;
+    return icons[severity.toLowerCase()] || icons.default;
   }
 
   // ============ 🛡️ SANITIZE DATA ============
 
-  // 🛠️ FIX #2 — Null-Safety
-  // البق القديم: كان بيحط الـ default values الأول، وبعدين بيعمل
-  // spread لـ widget.data تاني في الآخر، فلو value/unit جايين null
-  // من الأصل كانوا بيرجعوا يبوّظوا الـ default ويرجعوا null تاني
-  // (لأن الـ spread الأخير كان بيكتب فوق الـ default). دلوقتي بقينا
-  // نعمل spread للبيانات الأصلية الأول، وبعدين نطبق الـ default
-  // (?? ) فوقها في الآخر، فمفيش أي قيمة null ممكن تعدي.
   sanitizeWidgetData(widget) {
     if (!widget) return null;
 
@@ -769,6 +732,21 @@ class DashboardService extends BaseService {
 
   async exportDashboards(userId, companyId, format = 'json') {
     return this.repository.exportDashboards(userId, companyId, format);
+  }
+
+  // ============ HELPER ============
+
+  /**
+   * الحصول على معلومات المستخدم
+   */
+  async getUser(userId) {
+    try {
+      const User = require('../../users/models/User.model');
+      return await User.findOne({ firebaseUid: userId }).lean();
+    } catch (error) {
+      logger.warn('Failed to fetch user for dashboard name:', error.message);
+      return null;
+    }
   }
 }
 

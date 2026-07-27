@@ -2,13 +2,9 @@ const mongoose = require('mongoose');
 const BaseModel = require('../../../core/base/BaseModel');
 
 // ============ MACHINE SCHEMA ============
-// ✅ تم التحويل لاستخدام BaseModel.createSchema بدل new mongoose.Schema المباشر
-// لنفس السبب المذكور في ProductionLine و Department: بدون companyId معرّف في
-// الـ schema، Mongoose كان بيشيل الحقل بصمت وقت الحفظ (strict mode)، فالـ
-// Dashboard metrics (اللي بتفلتر بـ companyId) كانت بترجع 0 دايماً.
 
 const machineSchema = BaseModel.createSchema({
-  // ===== Base Fields (مضافة من BaseModel) =====
+  // ===== Base Fields (من BaseModel) =====
   // companyId, createdBy, updatedBy, createdAt, updatedAt, deletedAt, status, metadata
 
   name: {
@@ -161,13 +157,11 @@ const machineSchema = BaseModel.createSchema({
 });
 
 // ============ INDEXES ============
-// ✅ status و deletedAt معرّفين بالفعل في BaseModel، فاتشالوا من هنا
 
 machineSchema.index({ code: 1, factoryId: 1, companyId: 1 }, { unique: true });
 machineSchema.index({ factoryId: 1, departmentId: 1 });
 machineSchema.index({ factoryId: 1, status: 1 });
 machineSchema.index({ departmentId: 1, status: 1 });
-machineSchema.index({ productionLineId: 1 });
 machineSchema.index({ type: 1 });
 machineSchema.index({ operationalStatus: 1 });
 machineSchema.index({ 'performance.oee': 1 });
@@ -195,9 +189,11 @@ machineSchema.virtual('overallOEE').get(function() {
   return this.performance.oee || 0;
 });
 
-// ============ PRE-VALIDATE MIDDLEWARE (async style — no `next` param) ============
+// ============ PRE-VALIDATE MIDDLEWARE ============
+// ملاحظة: تم حذف next() نهائيًا، ونستخدم throw مباشرة بدل return next(new Error(...))
+// عشان Mongoose يلتقط أي throw هنا تلقائيًا ويحوله لخطأ validation.
 
-machineSchema.pre('validate', async function() {
+machineSchema.pre('validate', function() {
   if (this.name) this.name = this.name.trim();
   if (this.code) this.code = this.code.toUpperCase().trim();
   if (this.model) this.model = this.model.trim();
@@ -224,44 +220,54 @@ machineSchema.pre('validate', async function() {
   }
 });
 
-// ============ PRE-SAVE MIDDLEWARE (async style — no `next` param) ============
+// ============ PRE-SAVE MIDDLEWARE ============
 
-machineSchema.pre('save', async function() {
+machineSchema.pre('save', function() {
   this.updatedAt = new Date();
 
-  if (!this.name) throw new Error('Name is required');
-  if (!this.code) throw new Error('Code is required');
-  if (!this.type) throw new Error('Type is required');
-  if (!this.factoryId) throw new Error('Factory ID is required');
-  if (!this.departmentId) throw new Error('Department ID is required');
+  if (!this.name) {
+    throw new Error('Name is required');
+  }
+  if (!this.code) {
+    throw new Error('Code is required');
+  }
+  if (!this.type) {
+    throw new Error('Type is required');
+  }
+  if (!this.factoryId) {
+    throw new Error('Factory ID is required');
+  }
+  if (!this.departmentId) {
+    throw new Error('Department ID is required');
+  }
 
   this.performance.lastUpdated = new Date();
   this.energy.lastUpdated = new Date();
   this.sensors.lastUpdated = new Date();
 });
 
-// ============ PRE-UPDATE HOOKS (findOneAndUpdate / updateOne / updateMany) ============
+// ============ PRE-UPDATE HOOKS ============
 
-machineSchema.pre(['findOneAndUpdate', 'updateOne'], async function() {
+machineSchema.pre(['findOneAndUpdate', 'updateOne'], function() {
   this.set({ updatedAt: new Date() });
   this.set({ 'performance.lastUpdated': new Date() });
   this.set({ 'energy.lastUpdated': new Date() });
   this.set({ 'sensors.lastUpdated': new Date() });
 });
 
-machineSchema.pre('updateMany', async function() {
+machineSchema.pre('updateMany', function() {
   this.set({ updatedAt: new Date() });
 });
 
 // ============ POST-SAVE MIDDLEWARE ============
 
 machineSchema.post('save', function(doc) {
-  console.log('✅ Machine saved successfully:', doc._id);
+  if (process.env.NODE_ENV !== 'production') {
+    console.log('✅ Machine saved successfully:', doc._id);
+  }
 });
 
-// ⚠️ لازم 3 باراميترات (error, doc, next) عشان mongoose/kareem يتعرف على الدالة
-// كـ error handler صح، مش hook عادي (راجع نفس الملاحظة في ProductionLine/Department)
-
+// error-handling middleware (لازم تاخد 3 parameters بالظبط عشان Mongoose يتعرف عليها)
 machineSchema.post('save', function(error, doc, next) {
   if (error) {
     console.error('❌ Error saving machine:', error.message);
@@ -273,7 +279,7 @@ machineSchema.post('save', function(error, doc, next) {
 // ============ POST-FINDONEANDUPDATE MIDDLEWARE ============
 
 machineSchema.post('findOneAndUpdate', function(doc) {
-  if (doc) {
+  if (doc && process.env.NODE_ENV !== 'production') {
     console.log('✅ Machine updated successfully:', doc._id);
   }
 });
@@ -427,6 +433,8 @@ machineSchema.methods.toAdminJSON = function() {
  * البحث عن ماكينة بالكود
  */
 machineSchema.statics.findByCode = function(code, factoryId, companyId) {
+  if (!code) return null;
+
   const query = { code: code.toUpperCase(), deletedAt: null };
   if (factoryId) query.factoryId = factoryId;
   if (companyId) query.companyId = companyId;
@@ -437,6 +445,8 @@ machineSchema.statics.findByCode = function(code, factoryId, companyId) {
  * البحث عن ماكينات حسب النوع
  */
 machineSchema.statics.findByType = function(type, factoryId, companyId) {
+  if (!type) return [];
+
   const query = { type, deletedAt: null };
   if (factoryId) query.factoryId = factoryId;
   if (companyId) query.companyId = companyId;
@@ -447,6 +457,8 @@ machineSchema.statics.findByType = function(type, factoryId, companyId) {
  * البحث عن ماكينات حسب الحالة
  */
 machineSchema.statics.findByStatus = function(status, factoryId, companyId) {
+  if (!status) return [];
+
   const query = { status, deletedAt: null };
   if (factoryId) query.factoryId = factoryId;
   if (companyId) query.companyId = companyId;
@@ -496,6 +508,8 @@ machineSchema.statics.findHighPerformance = function(minOEE = 80, factoryId, com
  * البحث النصي
  */
 machineSchema.statics.search = function(searchTerm, factoryId, companyId) {
+  if (!searchTerm || searchTerm.length < 2) return [];
+
   const searchRegex = new RegExp(searchTerm, 'i');
   const query = {
     deletedAt: null,

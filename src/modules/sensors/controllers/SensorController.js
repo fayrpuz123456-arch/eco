@@ -23,6 +23,11 @@ const { idSchema } = require('../../../core/middleware/validation');
 const createSensorSchema = Joi.object({
   name: Joi.string().min(2).max(100).required(),
   code: Joi.string().min(2).max(20).uppercase().required(),
+  // ✅ إضافة companyId هنا كحقل اختياري عشان الـ validate middleware
+  //    (اللي بيستخدم stripUnknown: true) ميشيلوش من الـ body قبل ما يوصل للـ Controller.
+  //    لو مبعوتش، هيتم استخدام req.companyId (بتاع اليوزر المسجل دخوله) كـ fallback
+  //    داخل SensorService.createSensor.
+  companyId: Joi.string().optional(),
   description: Joi.string().max(500).optional(),
   type: Joi.string().valid(
     'PZEM004T', 'Current', 'Voltage', 'Power', 'Energy',
@@ -187,14 +192,14 @@ class SensorController extends BaseController {
     try {
       const { companyId } = req;
       const { page, limit, ...filter } = req.query;
-      
+
       const result = await this.service.getSensorsPaginated(
         companyId,
         parseInt(page) || 1,
         parseInt(limit) || 10,
         filter
       );
-      
+
       return sendPaginatedResponse(res, 'Sensors retrieved successfully', result.data, result.meta);
     } catch (error) {
       logger.error('Get sensors list error:', error);

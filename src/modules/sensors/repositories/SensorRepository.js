@@ -10,6 +10,17 @@ class SensorRepository extends BaseRepository {
     this.model = Sensor;
   }
 
+  // ============ CREATE ============
+
+  /**
+   * إنشاء حساس جديد - ✅ نضمن عدم تعديل companyId
+   */
+  async create(data) {
+    // ✅ لا نقوم بأي تعديل على companyId، نمرر البيانات كما هي
+    // BaseRepository.create() هيتعامل معاها بشكل طبيعي
+    return super.create(data);
+  }
+
   // ============ FIND METHODS ============
 
   async findByCode(code, machineId, companyId) {

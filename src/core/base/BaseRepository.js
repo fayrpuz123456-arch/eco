@@ -1,4 +1,3 @@
- 
 const { AppError, NotFoundError } = require('../middleware/errorHandler');
 const logger = require('../utils/logger');
 
@@ -15,9 +14,12 @@ class BaseRepository {
 
   /**
    * إنشاء مستند جديد
+   * ✅ لا نقوم بأي تعديل على companyId - نمرر البيانات كما هي
    */
   async create(data) {
     try {
+      // ✅ لا نضيف أي default لـ companyId
+      // ✅ نمرر البيانات كما هي من الـ Service
       const doc = new this.model(data);
       await doc.save();
       return doc;
@@ -82,32 +84,26 @@ class BaseRepository {
       
       let findQuery = this.model.find(query);
 
-      // تطبيق الفرز
       if (options.sort) {
         findQuery = findQuery.sort(options.sort);
       }
       
-      // تطبيق الحد
       if (options.limit) {
         findQuery = findQuery.limit(options.limit);
       }
       
-      // تطبيق التخطي
       if (options.skip) {
         findQuery = findQuery.skip(options.skip);
       }
       
-      // تطبيق الحقول المطلوبة
       if (options.select) {
         findQuery = findQuery.select(options.select);
       }
       
-      // تطبيق الـ populate
       if (options.populate) {
         findQuery = findQuery.populate(options.populate);
       }
       
-      // تطبيق الـ lean
       if (options.lean) {
         findQuery = findQuery.lean();
       }
@@ -447,7 +443,6 @@ class BaseRepository {
     try {
       let finalPipeline = pipeline;
       
-      // إضافة فلتر الشركة إذا وجد
       if (companyId) {
         const matchStage = { $match: { companyId } };
         finalPipeline = [matchStage, ...pipeline];

@@ -1,7 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const Machine = require('../models/Machine.model');
-const { authMiddleware } = require('../../../core/middleware/auth'); // ✅ استيراد الـ middleware
+const { authMiddleware } = require('../../../core/middleware/auth');
+const logger = require('../../../core/utils/logger');
 
 // ✅ تطبيق authMiddleware على جميع الراوتات
 router.use(authMiddleware);
@@ -9,7 +10,16 @@ router.use(authMiddleware);
 // ===== GET - قائمة الآلات =====
 router.get('/', async (req, res) => {
   try {
-    const companyId = req.companyId; // ✅ من الـ middleware
+    // استخدام companyId من الـ Body أو من الـ Auth
+    const companyId = req.body.companyId || req.companyId;
+    
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'companyId مطلوب في الـ Body أو من الـ Auth'
+      });
+    }
+
     const machines = await Machine.find({ 
       companyId, 
       deletedAt: null 
@@ -22,10 +32,11 @@ router.get('/', async (req, res) => {
       count: machines.length
     });
   } catch (error) {
+    logger.error('GET /machines error:', error);
     res.status(500).json({
       success: false,
       message: 'Error fetching machines',
-      error: error.message
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
 });
@@ -33,14 +44,23 @@ router.get('/', async (req, res) => {
 // ===== POST - إنشاء آلة جديدة =====
 router.post('/', async (req, res) => {
   try {
-    // ✅ قراءة companyId و userId من req (من الـ middleware)
-    const companyId = req.companyId;
     const userId = req.user.id;
+
+    // ✅ استخدم companyId من الـ Body لو موجود، وإلا استخدم من الـ Request
+    const companyId = req.body.companyId || req.companyId;
 
     if (!companyId || !userId) {
       return res.status(401).json({
         success: false,
         message: 'Unauthorized: user/company context missing from request'
+      });
+    }
+
+    // ✅ التحقق من صحة companyId
+    if (!companyId.startsWith('comp_')) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid company ID format. Must start with "comp_"'
       });
     }
 
@@ -82,7 +102,7 @@ router.post('/', async (req, res) => {
       });
     }
 
-    // ===== إنشاء الآلة مع companyId =====
+    // ===== إنشاء الآلة =====
     const newMachine = new Machine({
       name: name.trim(),
       code: code.toUpperCase().trim(),
@@ -96,8 +116,7 @@ router.post('/', async (req, res) => {
       manufacturer: manufacturer || null,
       operationalStatus: operationalStatus || 'idle',
       specifications: specifications || {},
-      // ✅ إضافة الحقول المطلوبة
-      companyId,
+      companyId, // ✅ استخدام companyId الصحيح
       createdBy: userId,
       updatedBy: userId,
       status: 'active'
@@ -111,11 +130,11 @@ router.post('/', async (req, res) => {
       data: savedMachine
     });
   } catch (error) {
-    console.error('❌ Error creating machine:', error);
+    logger.error('POST /machines error:', error);
     res.status(500).json({
       success: false,
       message: 'Error creating machine',
-      error: error.message
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
 });
@@ -123,12 +142,13 @@ router.post('/', async (req, res) => {
 // ===== GET - آلة بالمعرف =====
 router.get('/:id', async (req, res) => {
   try {
-    const companyId = req.companyId;
+    // استخدام companyId من الـ Body أو من الـ Auth
+    const companyId = req.body.companyId || req.companyId;
     
     if (!companyId) {
-      return res.status(401).json({
+      return res.status(400).json({
         success: false,
-        message: 'Unauthorized: companyId not found on request'
+        message: 'companyId مطلوب في الـ Body أو من الـ Auth'
       });
     }
 
@@ -151,10 +171,11 @@ router.get('/:id', async (req, res) => {
       data: machine
     });
   } catch (error) {
+    logger.error('GET /machines/:id error:', error);
     res.status(500).json({
       success: false,
       message: 'Error fetching machine',
-      error: error.message
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
 });
@@ -162,7 +183,8 @@ router.get('/:id', async (req, res) => {
 // ===== PUT - تحديث آلة =====
 router.put('/:id', async (req, res) => {
   try {
-    const companyId = req.companyId;
+    // استخدام companyId من الـ Body أو من الـ Auth
+    const companyId = req.body.companyId || req.companyId;
     const userId = req.user.id;
 
     if (!companyId || !userId) {
@@ -184,6 +206,11 @@ router.put('/:id', async (req, res) => {
         message: 'Machine not found'
       });
     }
+
+    // منع تحديث companyId و factoryId و departmentId
+    delete req.body.companyId;
+    delete req.body.factoryId;
+    delete req.body.departmentId;
 
     const { 
       name, 
@@ -216,10 +243,11 @@ router.put('/:id', async (req, res) => {
       data: updatedMachine
     });
   } catch (error) {
+    logger.error('PUT /machines/:id error:', error);
     res.status(500).json({
       success: false,
       message: 'Error updating machine',
-      error: error.message
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
 });
@@ -227,7 +255,8 @@ router.put('/:id', async (req, res) => {
 // ===== DELETE - حذف آلة (Soft Delete) =====
 router.delete('/:id', async (req, res) => {
   try {
-    const companyId = req.companyId;
+    // استخدام companyId من الـ Body أو من الـ Auth
+    const companyId = req.body.companyId || req.companyId;
     const userId = req.user.id;
 
     if (!companyId || !userId) {
@@ -260,10 +289,11 @@ router.delete('/:id', async (req, res) => {
       message: 'Machine deleted successfully'
     });
   } catch (error) {
+    logger.error('DELETE /machines/:id error:', error);
     res.status(500).json({
       success: false,
       message: 'Error deleting machine',
-      error: error.message
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
 });
