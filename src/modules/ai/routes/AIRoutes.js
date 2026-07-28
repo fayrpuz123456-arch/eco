@@ -8,15 +8,19 @@ const { getCompanyId, isValidCompanyId } = require('../../../core/utils/tenantHe
 const axios = require('axios');
 const logger = require('../../../core/utils/logger');
 
+// ✅ AI Service Base URL
+const AI_SERVICE_URL = process.env.AI_SERVICE_URL || 'https://ai-eco-service-production.up.railway.app';
+
 router.use(authMiddleware);
 router.use(tenantMiddleware(true));
 
-// ===== Health Check للـ AI Service =====
+// ===== Health Check =====
 router.get('/health', async (req, res) => {
   try {
-    const response = await axios.get(`${process.env.AI_SERVICE_URL}/health`);
+    const response = await axios.get(`${AI_SERVICE_URL}/health`);
     res.json(response.data);
   } catch (error) {
+    logger.error('❌ AI Health check failed:', error.message);
     res.status(503).json({
       success: false,
       message: 'AI Service unavailable',
@@ -25,7 +29,7 @@ router.get('/health', async (req, res) => {
   }
 });
 
-// ===== 1. تحليل قراءات الحساسات (Anomaly Detection) =====
+// ===== 1. Detect Anomalies =====
 router.post('/detect/anomalies', async (req, res) => {
   try {
     const companyId = getCompanyId(req);
@@ -46,10 +50,11 @@ router.post('/detect/anomalies', async (req, res) => {
       });
     }
 
-    // جلب القراءات من MongoDB لو مش موجودة في الـ Request
+    // جلب القراءات من MongoDB
+    const SensorReading = require('../../sensorReadings/models/SensorReading.model');
     let sensorReadings = readings;
+
     if (!sensorReadings) {
-      const SensorReading = require('../../sensorReadings/models/SensorReading.model');
       const dbReadings = await SensorReading.find({
         sensorId,
         companyId,
@@ -65,9 +70,9 @@ router.post('/detect/anomalies', async (req, res) => {
       }));
     }
 
-    // إرسال للـ AI Service
+    // ✅ إرسال للـ AI Service (المسار الصحيح)
     const aiResponse = await axios.post(
-      `${process.env.AI_SERVICE_URL}/detect/anomalies`,
+      `${AI_SERVICE_URL}/detect/anomalies`,
       {
         sensorId,
         readings: sensorReadings,
@@ -77,7 +82,8 @@ router.post('/detect/anomalies', async (req, res) => {
         headers: {
           'x-company-id': companyId,
           'Content-Type': 'application/json'
-        }
+        },
+        timeout: 30000
       }
     );
 
@@ -88,7 +94,16 @@ router.post('/detect/anomalies', async (req, res) => {
     });
 
   } catch (error) {
-    logger.error('❌ Anomaly detection error:', error);
+    logger.error('❌ Anomaly detection error:', error.message);
+    
+    if (error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
+      return res.status(503).json({
+        success: false,
+        message: 'AI Service unavailable',
+        error: 'Cannot connect to AI service'
+      });
+    }
+
     res.status(500).json({
       success: false,
       message: 'Error detecting anomalies',
@@ -97,7 +112,7 @@ router.post('/detect/anomalies', async (req, res) => {
   }
 });
 
-// ===== 2. توقع الصيانة =====
+// ===== 2. Predict Maintenance =====
 router.post('/predict/maintenance', async (req, res) => {
   try {
     const companyId = getCompanyId(req);
@@ -133,7 +148,7 @@ router.post('/predict/maintenance', async (req, res) => {
       });
     }
 
-    // جلب قراءات الماكينة
+    // جلب القراءات
     const SensorReading = require('../../sensorReadings/models/SensorReading.model');
     const readings = await SensorReading.find({
       machineId,
@@ -144,7 +159,6 @@ router.post('/predict/maintenance', async (req, res) => {
     .limit(100)
     .lean();
 
-    // بناء الـ features
     const featuresData = features || {
       temperature: readings.length > 0 ? readings[0].value : 0,
       vibration: 0.002,
@@ -154,12 +168,11 @@ router.post('/predict/maintenance', async (req, res) => {
       oilLevel: 80
     };
 
-    // جلب تاريخ الأعطال (لو موجود)
     const historicalFailures = machine.maintenance?.maintenanceHistory || [];
 
-    // إرسال للـ AI Service
+    // ✅ إرسال للـ AI Service
     const aiResponse = await axios.post(
-      `${process.env.AI_SERVICE_URL}/predict/maintenance`,
+      `${AI_SERVICE_URL}/predict/maintenance`,
       {
         machineId,
         features: featuresData,
@@ -169,7 +182,8 @@ router.post('/predict/maintenance', async (req, res) => {
         headers: {
           'x-company-id': companyId,
           'Content-Type': 'application/json'
-        }
+        },
+        timeout: 30000
       }
     );
 
@@ -180,7 +194,7 @@ router.post('/predict/maintenance', async (req, res) => {
     });
 
   } catch (error) {
-    logger.error('❌ Maintenance prediction error:', error);
+    logger.error('❌ Maintenance prediction error:', error.message);
     res.status(500).json({
       success: false,
       message: 'Error predicting maintenance',
@@ -189,7 +203,7 @@ router.post('/predict/maintenance', async (req, res) => {
   }
 });
 
-// ===== 3. تحليل استهلاك الطاقة =====
+// ===== 3. Predict Consumption =====
 router.post('/predict/consumption', async (req, res) => {
   try {
     const companyId = getCompanyId(req);
@@ -210,7 +224,7 @@ router.post('/predict/consumption', async (req, res) => {
       });
     }
 
-    // جلب البيانات التاريخية من MongoDB لو مش موجودة
+    // جلب البيانات التاريخية
     let data = historicalData;
     if (!data) {
       const SensorReading = require('../../sensorReadings/models/SensorReading.model');
@@ -229,9 +243,9 @@ router.post('/predict/consumption', async (req, res) => {
       }));
     }
 
-    // إرسال للـ AI Service
+    // ✅ إرسال للـ AI Service
     const aiResponse = await axios.post(
-      `${process.env.AI_SERVICE_URL}/predict/consumption`,
+      `${AI_SERVICE_URL}/predict/consumption`,
       {
         factoryId,
         metric: metric || 'energy',
@@ -242,7 +256,8 @@ router.post('/predict/consumption', async (req, res) => {
         headers: {
           'x-company-id': companyId,
           'Content-Type': 'application/json'
-        }
+        },
+        timeout: 30000
       }
     );
 
@@ -253,7 +268,7 @@ router.post('/predict/consumption', async (req, res) => {
     });
 
   } catch (error) {
-    logger.error('❌ Consumption prediction error:', error);
+    logger.error('❌ Consumption prediction error:', error.message);
     res.status(500).json({
       success: false,
       message: 'Error predicting consumption',
@@ -262,61 +277,7 @@ router.post('/predict/consumption', async (req, res) => {
   }
 });
 
-// ===== 4. كشف التسريبات =====
-router.post('/detect/leaks', async (req, res) => {
-  try {
-    const companyId = getCompanyId(req);
-    
-    if (!companyId || !isValidCompanyId(companyId)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid company ID'
-      });
-    }
-
-    const { sensorId, readings, expectedFlow, threshold } = req.body;
-
-    if (!sensorId || !readings) {
-      return res.status(400).json({
-        success: false,
-        message: 'sensorId and readings are required'
-      });
-    }
-
-    // إرسال للـ AI Service
-    const aiResponse = await axios.post(
-      `${process.env.AI_SERVICE_URL}/detect/leaks`,
-      {
-        sensorId,
-        readings,
-        expectedFlow: expectedFlow || 100,
-        threshold: threshold || 3.0
-      },
-      {
-        headers: {
-          'x-company-id': companyId,
-          'Content-Type': 'application/json'
-        }
-      }
-    );
-
-    res.json({
-      success: true,
-      message: 'Leak detection completed',
-      data: aiResponse.data
-    });
-
-  } catch (error) {
-    logger.error('❌ Leak detection error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error detecting leaks',
-      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
-    });
-  }
-});
-
-// ===== 5. توليد توصيات =====
+// ===== 4. Generate Recommendations =====
 router.post('/generate/recommendations', async (req, res) => {
   try {
     const companyId = getCompanyId(req);
@@ -345,7 +306,7 @@ router.post('/generate/recommendations', async (req, res) => {
       });
     }
 
-    // جلب قراءات المصنع
+    // جلب القراءات
     const SensorReading = require('../../sensorReadings/models/SensorReading.model');
     const query = { companyId, deletedAt: null };
     if (factoryId) query.factoryId = factoryId;
@@ -356,9 +317,9 @@ router.post('/generate/recommendations', async (req, res) => {
       .limit(500)
       .lean();
 
-    // إرسال للـ AI Service
+    // ✅ إرسال للـ AI Service
     const aiResponse = await axios.post(
-      `${process.env.AI_SERVICE_URL}/generate/recommendations`,
+      `${AI_SERVICE_URL}/generate/recommendations`,
       {
         factoryId,
         machineId,
@@ -369,7 +330,8 @@ router.post('/generate/recommendations', async (req, res) => {
         headers: {
           'x-company-id': companyId,
           'Content-Type': 'application/json'
-        }
+        },
+        timeout: 30000
       }
     );
 
@@ -380,7 +342,7 @@ router.post('/generate/recommendations', async (req, res) => {
     });
 
   } catch (error) {
-    logger.error('❌ Recommendations error:', error);
+    logger.error('❌ Recommendations error:', error.message);
     res.status(500).json({
       success: false,
       message: 'Error generating recommendations',
@@ -389,7 +351,62 @@ router.post('/generate/recommendations', async (req, res) => {
   }
 });
 
-// ===== 6. توقع انبعاثات الكربون =====
+// ===== 5. Detect Leaks =====
+router.post('/detect/leaks', async (req, res) => {
+  try {
+    const companyId = getCompanyId(req);
+    
+    if (!companyId || !isValidCompanyId(companyId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid company ID'
+      });
+    }
+
+    const { sensorId, readings, expectedFlow, threshold } = req.body;
+
+    if (!sensorId || !readings) {
+      return res.status(400).json({
+        success: false,
+        message: 'sensorId and readings are required'
+      });
+    }
+
+    // ✅ إرسال للـ AI Service
+    const aiResponse = await axios.post(
+      `${AI_SERVICE_URL}/detect/leaks`,
+      {
+        sensorId,
+        readings,
+        expectedFlow: expectedFlow || 100,
+        threshold: threshold || 3.0
+      },
+      {
+        headers: {
+          'x-company-id': companyId,
+          'Content-Type': 'application/json'
+        },
+        timeout: 30000
+      }
+    );
+
+    res.json({
+      success: true,
+      message: 'Leak detection completed',
+      data: aiResponse.data
+    });
+
+  } catch (error) {
+    logger.error('❌ Leak detection error:', error.message);
+    res.status(500).json({
+      success: false,
+      message: 'Error detecting leaks',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
+  }
+});
+
+// ===== 6. Predict Carbon =====
 router.post('/predict/carbon', async (req, res) => {
   try {
     const companyId = getCompanyId(req);
@@ -411,24 +428,27 @@ router.post('/predict/carbon', async (req, res) => {
     }
 
     // جلب البيانات التاريخية
-    const SensorReading = require('../../sensorReadings/models/SensorReading.model');
-    const readings = await SensorReading.find({
-      factoryId,
-      companyId,
-      deletedAt: null
-    })
-    .sort({ timestamp: -1 })
-    .limit(100)
-    .lean();
+    let data = historicalData;
+    if (!data) {
+      const SensorReading = require('../../sensorReadings/models/SensorReading.model');
+      const readings = await SensorReading.find({
+        factoryId,
+        companyId,
+        deletedAt: null
+      })
+      .sort({ timestamp: -1 })
+      .limit(100)
+      .lean();
+      
+      data = readings.map(r => ({
+        date: r.timestamp.toISOString().split('T')[0],
+        value: r.value
+      }));
+    }
 
-    const data = historicalData || readings.map(r => ({
-      date: r.timestamp.toISOString().split('T')[0],
-      value: r.value
-    }));
-
-    // إرسال للـ AI Service
+    // ✅ إرسال للـ AI Service
     const aiResponse = await axios.post(
-      `${process.env.AI_SERVICE_URL}/predict/carbon`,
+      `${AI_SERVICE_URL}/predict/carbon`,
       {
         factoryId,
         period: period || 'next_30_days',
@@ -438,7 +458,8 @@ router.post('/predict/carbon', async (req, res) => {
         headers: {
           'x-company-id': companyId,
           'Content-Type': 'application/json'
-        }
+        },
+        timeout: 30000
       }
     );
 
@@ -449,71 +470,10 @@ router.post('/predict/carbon', async (req, res) => {
     });
 
   } catch (error) {
-    logger.error('❌ Carbon prediction error:', error);
+    logger.error('❌ Carbon prediction error:', error.message);
     res.status(500).json({
       success: false,
       message: 'Error predicting carbon emissions',
-      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
-    });
-  }
-});
-
-// ===== 7. تحليل What-If =====
-router.post('/analyze/whatif', async (req, res) => {
-  try {
-    const companyId = getCompanyId(req);
-    
-    if (!companyId || !isValidCompanyId(companyId)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid company ID'
-      });
-    }
-
-    const { scenario, variables, factoryId } = req.body;
-
-    if (!scenario || !variables) {
-      return res.status(400).json({
-        success: false,
-        message: 'scenario and variables are required'
-      });
-    }
-
-    // جلب بيانات المصنع
-    const Factory = require('../../factories/models/Factory.model');
-    const factory = await Factory.findOne({
-      _id: factoryId,
-      companyId,
-      deletedAt: null
-    });
-
-    // إرسال للـ AI Service
-    const aiResponse = await axios.post(
-      `${process.env.AI_SERVICE_URL}/analyze/whatif`,
-      {
-        scenario,
-        variables,
-        factoryData: factory
-      },
-      {
-        headers: {
-          'x-company-id': companyId,
-          'Content-Type': 'application/json'
-        }
-      }
-    );
-
-    res.json({
-      success: true,
-      message: 'What-If analysis completed',
-      data: aiResponse.data
-    });
-
-  } catch (error) {
-    logger.error('❌ What-If analysis error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error performing What-If analysis',
       error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
