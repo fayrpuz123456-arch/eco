@@ -1,23 +1,20 @@
 const express = require('express');
 const router = express.Router();
 const SensorReading = require('../models/SensorReading.model');
+const Sensor = require('../models/Sensor.model');
 const { authMiddleware } = require('../../../core/middleware/auth');
 const { tenantMiddleware } = require('../../../core/middleware/tenant');
+const { getCompanyId, isValidCompanyId } = require('../../../core/utils/tenantHelper');
 const logger = require('../../../core/utils/logger');
 
 // ✅ تطبيق الـ Middleware
 router.use(authMiddleware);
 router.use(tenantMiddleware(true));
 
-// ===== Helper function للحصول على companyId =====
-const getCompanyId = (req) => {
-  return req.body?.companyId || req.headers?.['x-company-id'] || req.companyId;
-};
-
 // ===== POST - إضافة قراءة جديدة =====
 router.post('/', async (req, res) => {
   try {
-    // ✅ استخدام companyId من الـ Body أو الـ Header أو الـ Auth
+    // ✅ استخدام getCompanyId من الـ Helper
     const companyId = getCompanyId(req);
     const userId = req.user?.id;
 
@@ -28,11 +25,8 @@ router.post('/', async (req, res) => {
       });
     }
 
-    // ✅ التحقق من صحة companyId (يدعم ObjectId و comp_)
-    const isValidObjectId = /^[0-9a-fA-F]{24}$/.test(companyId);
-    const isValidCompanyCode = companyId.startsWith('comp_') && companyId.length >= 10;
-    
-    if (!isValidObjectId && !isValidCompanyCode) {
+    // ✅ التحقق من صحة companyId
+    if (!isValidCompanyId(companyId)) {
       return res.status(400).json({
         success: false,
         message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
@@ -83,7 +77,7 @@ router.post('/', async (req, res) => {
       unit: unit.trim(),
       timestamp: timestamp || new Date(),
       quality: quality || 'good',
-      companyId, // ✅ استخدام companyId الصحيح
+      companyId,
       factoryId,
       machineId,
       departmentId: departmentId || null,
@@ -98,7 +92,6 @@ router.post('/', async (req, res) => {
 
     // ✅ تحديث آخر قراءة في الـ Sensor
     try {
-      const Sensor = require('../models/Sensor.model');
       await Sensor.updateOne(
         { _id: sensorId, companyId },
         {
@@ -144,13 +137,21 @@ router.post('/', async (req, res) => {
 // ===== GET - قراءات حساس معين =====
 router.get('/sensor/:sensorId', async (req, res) => {
   try {
-    // ✅ استخدام companyId من الـ Body أو الـ Header أو الـ Auth
+    // ✅ استخدام getCompanyId من الـ Helper
     const companyId = getCompanyId(req);
 
     if (!companyId) {
       return res.status(400).json({
         success: false,
         message: 'companyId مطلوب في الـ Body أو الـ Header (x-company-id) أو من الـ Auth'
+      });
+    }
+
+    if (!isValidCompanyId(companyId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
+        received: companyId
       });
     }
 
@@ -203,13 +204,21 @@ router.get('/sensor/:sensorId', async (req, res) => {
 // ===== GET - آخر قراءة لحساس =====
 router.get('/sensor/:sensorId/latest', async (req, res) => {
   try {
-    // ✅ استخدام companyId من الـ Body أو الـ Header أو الـ Auth
+    // ✅ استخدام getCompanyId من الـ Helper
     const companyId = getCompanyId(req);
 
     if (!companyId) {
       return res.status(400).json({
         success: false,
         message: 'companyId مطلوب في الـ Body أو الـ Header (x-company-id) أو من الـ Auth'
+      });
+    }
+
+    if (!isValidCompanyId(companyId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
+        received: companyId
       });
     }
 
@@ -248,13 +257,21 @@ router.get('/sensor/:sensorId/latest', async (req, res) => {
 // ===== GET - قراءات ماكينة معينة =====
 router.get('/machine/:machineId', async (req, res) => {
   try {
-    // ✅ استخدام companyId من الـ Body أو الـ Header أو الـ Auth
+    // ✅ استخدام getCompanyId من الـ Helper
     const companyId = getCompanyId(req);
 
     if (!companyId) {
       return res.status(400).json({
         success: false,
         message: 'companyId مطلوب في الـ Body أو الـ Header (x-company-id) أو من الـ Auth'
+      });
+    }
+
+    if (!isValidCompanyId(companyId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
+        received: companyId
       });
     }
 
@@ -307,13 +324,21 @@ router.get('/machine/:machineId', async (req, res) => {
 // ===== GET - قراءة بالمعرف =====
 router.get('/:id', async (req, res) => {
   try {
-    // ✅ استخدام companyId من الـ Body أو الـ Header أو الـ Auth
+    // ✅ استخدام getCompanyId من الـ Helper
     const companyId = getCompanyId(req);
 
     if (!companyId) {
       return res.status(400).json({
         success: false,
         message: 'companyId مطلوب في الـ Body أو الـ Header (x-company-id) أو من الـ Auth'
+      });
+    }
+
+    if (!isValidCompanyId(companyId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
+        received: companyId
       });
     }
 
@@ -348,13 +373,21 @@ router.get('/:id', async (req, res) => {
 // ===== GET - إحصائيات قراءات حساس =====
 router.get('/stats/:sensorId', async (req, res) => {
   try {
-    // ✅ استخدام companyId من الـ Body أو الـ Header أو الـ Auth
+    // ✅ استخدام getCompanyId من الـ Helper
     const companyId = getCompanyId(req);
 
     if (!companyId) {
       return res.status(400).json({
         success: false,
         message: 'companyId مطلوب في الـ Body أو الـ Header (x-company-id) أو من الـ Auth'
+      });
+    }
+
+    if (!isValidCompanyId(companyId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
+        received: companyId
       });
     }
 
@@ -416,7 +449,7 @@ router.get('/stats/:sensorId', async (req, res) => {
 // ===== DELETE - حذف قراءة (Soft Delete) =====
 router.delete('/:id', async (req, res) => {
   try {
-    // ✅ استخدام companyId من الـ Body أو الـ Header أو الـ Auth
+    // ✅ استخدام getCompanyId من الـ Helper
     const companyId = getCompanyId(req);
     const userId = req.user?.id;
 
@@ -424,6 +457,14 @@ router.delete('/:id', async (req, res) => {
       return res.status(401).json({
         success: false,
         message: 'Unauthorized: user/company context missing from request'
+      });
+    }
+
+    if (!isValidCompanyId(companyId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
+        received: companyId
       });
     }
 
