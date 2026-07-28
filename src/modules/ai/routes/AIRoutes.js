@@ -8,7 +8,6 @@ const { getCompanyId, isValidCompanyId } = require('../../../core/utils/tenantHe
 const axios = require('axios');
 const logger = require('../../../core/utils/logger');
 
-// ✅ AI Service Base URL
 const AI_SERVICE_URL = process.env.AI_SERVICE_URL || 'https://ai-eco-service-production.up.railway.app';
 
 router.use(authMiddleware);
@@ -70,7 +69,7 @@ router.post('/detect/anomalies', async (req, res) => {
       }));
     }
 
-    // ✅ إرسال للـ AI Service (المسار الصحيح)
+    // ✅ إرسال للـ AI Service (المسار الصحيح من Swagger)
     const aiResponse = await axios.post(
       `${AI_SERVICE_URL}/detect/anomalies`,
       {
@@ -96,11 +95,11 @@ router.post('/detect/anomalies', async (req, res) => {
   } catch (error) {
     logger.error('❌ Anomaly detection error:', error.message);
     
-    if (error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
-      return res.status(503).json({
+    if (error.response) {
+      return res.status(error.response.status).json({
         success: false,
-        message: 'AI Service unavailable',
-        error: 'Cannot connect to AI service'
+        message: 'AI Service error',
+        error: error.response.data
       });
     }
 
@@ -112,7 +111,90 @@ router.post('/detect/anomalies', async (req, res) => {
   }
 });
 
-// ===== 2. Predict Maintenance =====
+// ===== 2. Predict Consumption =====
+router.post('/predict/consumption', async (req, res) => {
+  try {
+    const companyId = getCompanyId(req);
+    
+    if (!companyId || !isValidCompanyId(companyId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid company ID'
+      });
+    }
+
+    const { factoryId, metric, period, historicalData } = req.body;
+
+    if (!factoryId) {
+      return res.status(400).json({
+        success: false,
+        message: 'factoryId is required'
+      });
+    }
+
+    // جلب البيانات التاريخية
+    let data = historicalData;
+    if (!data) {
+      const SensorReading = require('../../sensorReadings/models/SensorReading.model');
+      const readings = await SensorReading.find({
+        factoryId,
+        companyId,
+        deletedAt: null
+      })
+      .sort({ timestamp: -1 })
+      .limit(100)
+      .lean();
+      
+      data = readings.map(r => ({
+        date: r.timestamp.toISOString().split('T')[0],
+        value: r.value
+      }));
+    }
+
+    // ✅ إرسال للـ AI Service
+    const aiResponse = await axios.post(
+      `${AI_SERVICE_URL}/predict/consumption`,
+      {
+        factoryId,
+        metric: metric || 'energy',
+        period: period || 'next_30_days',
+        historicalData: data
+      },
+      {
+        headers: {
+          'x-company-id': companyId,
+          'Content-Type': 'application/json'
+        },
+        timeout: 30000
+      }
+    );
+
+    res.json({
+      success: true,
+      message: 'Consumption prediction completed',
+      data: aiResponse.data
+    });
+
+  } catch (error) {
+    logger.error('❌ Consumption prediction error:', error.message);
+    
+    if (error.response) {
+      return res.status(error.response.status).json({
+        success: false,
+        message: 'AI Service error',
+        error: error.response.data
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      message: 'Error predicting consumption',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
+  }
+});
+
+// ===== 3. Predict Maintenance =====
 router.post('/predict/maintenance', async (req, res) => {
   try {
     const companyId = getCompanyId(req);
@@ -195,83 +277,18 @@ router.post('/predict/maintenance', async (req, res) => {
 
   } catch (error) {
     logger.error('❌ Maintenance prediction error:', error.message);
+    
+    if (error.response) {
+      return res.status(error.response.status).json({
+        success: false,
+        message: 'AI Service error',
+        error: error.response.data
+      });
+    }
+
     res.status(500).json({
       success: false,
       message: 'Error predicting maintenance',
-      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
-    });
-  }
-});
-
-// ===== 3. Predict Consumption =====
-router.post('/predict/consumption', async (req, res) => {
-  try {
-    const companyId = getCompanyId(req);
-    
-    if (!companyId || !isValidCompanyId(companyId)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid company ID'
-      });
-    }
-
-    const { factoryId, metric, period, historicalData } = req.body;
-
-    if (!factoryId) {
-      return res.status(400).json({
-        success: false,
-        message: 'factoryId is required'
-      });
-    }
-
-    // جلب البيانات التاريخية
-    let data = historicalData;
-    if (!data) {
-      const SensorReading = require('../../sensorReadings/models/SensorReading.model');
-      const readings = await SensorReading.find({
-        factoryId,
-        companyId,
-        deletedAt: null
-      })
-      .sort({ timestamp: -1 })
-      .limit(100)
-      .lean();
-      
-      data = readings.map(r => ({
-        date: r.timestamp.toISOString().split('T')[0],
-        value: r.value
-      }));
-    }
-
-    // ✅ إرسال للـ AI Service
-    const aiResponse = await axios.post(
-      `${AI_SERVICE_URL}/predict/consumption`,
-      {
-        factoryId,
-        metric: metric || 'energy',
-        period: period || 'next_30_days',
-        historicalData: data
-      },
-      {
-        headers: {
-          'x-company-id': companyId,
-          'Content-Type': 'application/json'
-        },
-        timeout: 30000
-      }
-    );
-
-    res.json({
-      success: true,
-      message: 'Consumption prediction completed',
-      data: aiResponse.data
-    });
-
-  } catch (error) {
-    logger.error('❌ Consumption prediction error:', error.message);
-    res.status(500).json({
-      success: false,
-      message: 'Error predicting consumption',
       error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
@@ -290,6 +307,13 @@ router.post('/generate/recommendations', async (req, res) => {
     }
 
     const { factoryId, machineId } = req.body;
+
+    if (!factoryId) {
+      return res.status(400).json({
+        success: false,
+        message: 'factoryId is required'
+      });
+    }
 
     // جلب بيانات المصنع
     const Factory = require('../../factories/models/Factory.model');
@@ -343,137 +367,18 @@ router.post('/generate/recommendations', async (req, res) => {
 
   } catch (error) {
     logger.error('❌ Recommendations error:', error.message);
+    
+    if (error.response) {
+      return res.status(error.response.status).json({
+        success: false,
+        message: 'AI Service error',
+        error: error.response.data
+      });
+    }
+
     res.status(500).json({
       success: false,
       message: 'Error generating recommendations',
-      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
-    });
-  }
-});
-
-// ===== 5. Detect Leaks =====
-router.post('/detect/leaks', async (req, res) => {
-  try {
-    const companyId = getCompanyId(req);
-    
-    if (!companyId || !isValidCompanyId(companyId)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid company ID'
-      });
-    }
-
-    const { sensorId, readings, expectedFlow, threshold } = req.body;
-
-    if (!sensorId || !readings) {
-      return res.status(400).json({
-        success: false,
-        message: 'sensorId and readings are required'
-      });
-    }
-
-    // ✅ إرسال للـ AI Service
-    const aiResponse = await axios.post(
-      `${AI_SERVICE_URL}/detect/leaks`,
-      {
-        sensorId,
-        readings,
-        expectedFlow: expectedFlow || 100,
-        threshold: threshold || 3.0
-      },
-      {
-        headers: {
-          'x-company-id': companyId,
-          'Content-Type': 'application/json'
-        },
-        timeout: 30000
-      }
-    );
-
-    res.json({
-      success: true,
-      message: 'Leak detection completed',
-      data: aiResponse.data
-    });
-
-  } catch (error) {
-    logger.error('❌ Leak detection error:', error.message);
-    res.status(500).json({
-      success: false,
-      message: 'Error detecting leaks',
-      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
-    });
-  }
-});
-
-// ===== 6. Predict Carbon =====
-router.post('/predict/carbon', async (req, res) => {
-  try {
-    const companyId = getCompanyId(req);
-    
-    if (!companyId || !isValidCompanyId(companyId)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid company ID'
-      });
-    }
-
-    const { factoryId, period, historicalData } = req.body;
-
-    if (!factoryId) {
-      return res.status(400).json({
-        success: false,
-        message: 'factoryId is required'
-      });
-    }
-
-    // جلب البيانات التاريخية
-    let data = historicalData;
-    if (!data) {
-      const SensorReading = require('../../sensorReadings/models/SensorReading.model');
-      const readings = await SensorReading.find({
-        factoryId,
-        companyId,
-        deletedAt: null
-      })
-      .sort({ timestamp: -1 })
-      .limit(100)
-      .lean();
-      
-      data = readings.map(r => ({
-        date: r.timestamp.toISOString().split('T')[0],
-        value: r.value
-      }));
-    }
-
-    // ✅ إرسال للـ AI Service
-    const aiResponse = await axios.post(
-      `${AI_SERVICE_URL}/predict/carbon`,
-      {
-        factoryId,
-        period: period || 'next_30_days',
-        historicalData: data
-      },
-      {
-        headers: {
-          'x-company-id': companyId,
-          'Content-Type': 'application/json'
-        },
-        timeout: 30000
-      }
-    );
-
-    res.json({
-      success: true,
-      message: 'Carbon prediction completed',
-      data: aiResponse.data
-    });
-
-  } catch (error) {
-    logger.error('❌ Carbon prediction error:', error.message);
-    res.status(500).json({
-      success: false,
-      message: 'Error predicting carbon emissions',
       error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
