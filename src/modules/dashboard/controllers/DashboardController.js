@@ -17,6 +17,7 @@ const { PERMISSIONS, checkPermissions } = require('../../../core/middleware/perm
 const logger = require('../../../core/utils/logger');
 const Joi = require('joi');
 const { idSchema } = require('../../../core/middleware/validation');
+const { getCompanyId, isValidCompanyId } = require('../../../core/utils/tenantHelper');
 
 // ============ SCHEMAS ============
 
@@ -28,7 +29,7 @@ const createDashboardSchema = Joi.object({
     'water', 'carbon', 'waste', 'maintenance', 'financial', 'custom'
   ).required(),
   layout: Joi.string().valid('grid', 'list', 'flex', 'custom').default('grid'),
-  companyId: Joi.string().optional(), // ✅ إضافة companyId كاختياري
+  companyId: Joi.string().optional(),
   preferences: Joi.object({
     refreshRate: Joi.number().default(30),
     autoRefresh: Joi.boolean().default(true),
@@ -111,12 +112,19 @@ class DashboardController extends BaseController {
 
   async create(req, res) {
     try {
-      // ✅ استخدام companyId من الـ Body أو من الـ Auth
-      const companyId = req.body.companyId || req.companyId;
-      const userId = req.user.id;
+      // ✅ استخدام getCompanyId من الـ Helper
+      const companyId = getCompanyId(req);
+      const userId = req.user?.id;
 
       if (!companyId || !userId) {
         return sendUnauthorized(res, 'Unauthorized: user/company context missing from request');
+      }
+
+      // ✅ التحقق من صحة companyId
+      if (!isValidCompanyId(companyId)) {
+        return sendError(res, 400, 'Invalid company ID format. Must be ObjectId or start with "comp_"', {
+          received: companyId
+        });
       }
 
       // ✅ التأكد من أن companyId في الـ Body مطابق للـ companyId من الـ Auth (لأغراض أمنية)
@@ -131,7 +139,7 @@ class DashboardController extends BaseController {
       const result = await this.service.createDashboard(body, userId, companyId);
       return sendCreated(res, 'Dashboard created successfully', result);
     } catch (error) {
-      logger.error('Create dashboard error:', error);
+      logger.error('❌ Create dashboard error:', error);
       return this.handleError(res, error);
     }
   }
@@ -140,18 +148,24 @@ class DashboardController extends BaseController {
 
   async getList(req, res) {
     try {
-      // ✅ استخدام companyId من الـ Body أو من الـ Auth
-      const companyId = req.body.companyId || req.companyId || req.query.companyId;
-      const userId = req.user.id;
+      // ✅ استخدام getCompanyId من الـ Helper
+      const companyId = getCompanyId(req);
+      const userId = req.user?.id;
 
       if (!companyId || !userId) {
         return sendUnauthorized(res, 'Unauthorized: user/company context missing from request');
       }
 
+      if (!isValidCompanyId(companyId)) {
+        return sendError(res, 400, 'Invalid company ID format. Must be ObjectId or start with "comp_"', {
+          received: companyId
+        });
+      }
+
       const result = await this.service.getUserDashboards(userId, companyId);
       return sendResponse(res, 200, 'Dashboards retrieved successfully', result);
     } catch (error) {
-      logger.error('Get dashboards list error:', error);
+      logger.error('❌ Get dashboards list error:', error);
       return this.handleError(res, error);
     }
   }
@@ -159,59 +173,97 @@ class DashboardController extends BaseController {
   async getById(req, res) {
     try {
       const { id } = req.params;
-      // ✅ استخدام companyId من الـ Body أو من الـ Auth
-      const companyId = req.body.companyId || req.companyId || req.query.companyId;
-      const userId = req.user.id;
+      // ✅ استخدام getCompanyId من الـ Helper
+      const companyId = getCompanyId(req);
+      const userId = req.user?.id;
 
       if (!companyId || !userId) {
         return sendUnauthorized(res, 'Unauthorized: user/company context missing from request');
       }
 
+      if (!isValidCompanyId(companyId)) {
+        return sendError(res, 400, 'Invalid company ID format. Must be ObjectId or start with "comp_"', {
+          received: companyId
+        });
+      }
+
       const result = await this.service.getDashboardById(id, userId, companyId);
       return sendResponse(res, 200, 'Dashboard retrieved successfully', result);
     } catch (error) {
-      logger.error('Get dashboard by id error:', error);
+      logger.error('❌ Get dashboard by id error:', error);
       return this.handleError(res, error);
     }
   }
 
   async getDefault(req, res) {
     try {
-      // ✅ استخدام companyId من الـ Body أو من الـ Auth
-      const companyId = req.body.companyId || req.companyId || req.query.companyId;
-      const userId = req.user.id;
+      // ✅ استخدام getCompanyId من الـ Helper
+      const companyId = getCompanyId(req);
+      const userId = req.user?.id;
 
       if (!companyId || !userId) {
         return sendUnauthorized(res, 'Unauthorized: user/company context missing from request');
       }
 
+      if (!isValidCompanyId(companyId)) {
+        return sendError(res, 400, 'Invalid company ID format. Must be ObjectId or start with "comp_"', {
+          received: companyId
+        });
+      }
+
       const result = await this.service.getDefaultDashboard(userId, companyId);
       return sendResponse(res, 200, 'Default dashboard retrieved successfully', result);
     } catch (error) {
-      logger.error('Get default dashboard error:', error);
+      logger.error('❌ Get default dashboard error:', error);
       return this.handleError(res, error);
     }
   }
 
   async getByType(req, res) {
     try {
-      const { user, companyId } = req;
+      // ✅ استخدام getCompanyId من الـ Helper
+      const companyId = getCompanyId(req);
+      const userId = req.user?.id;
+
+      if (!companyId || !userId) {
+        return sendUnauthorized(res, 'Unauthorized: user/company context missing from request');
+      }
+
+      if (!isValidCompanyId(companyId)) {
+        return sendError(res, 400, 'Invalid company ID format. Must be ObjectId or start with "comp_"', {
+          received: companyId
+        });
+      }
+
       const { type } = req.params;
-      const result = await this.service.getDashboardsByType(user.id, companyId, type);
+      const result = await this.service.getDashboardsByType(userId, companyId, type);
       return sendResponse(res, 200, 'Dashboards by type retrieved successfully', result);
     } catch (error) {
-      logger.error('Get dashboards by type error:', error);
+      logger.error('❌ Get dashboards by type error:', error);
       return this.handleError(res, error);
     }
   }
 
   async getPinned(req, res) {
     try {
-      const { user, companyId } = req;
-      const result = await this.service.getPinnedDashboards(user.id, companyId);
+      // ✅ استخدام getCompanyId من الـ Helper
+      const companyId = getCompanyId(req);
+      const userId = req.user?.id;
+
+      if (!companyId || !userId) {
+        return sendUnauthorized(res, 'Unauthorized: user/company context missing from request');
+      }
+
+      if (!isValidCompanyId(companyId)) {
+        return sendError(res, 400, 'Invalid company ID format. Must be ObjectId or start with "comp_"', {
+          received: companyId
+        });
+      }
+
+      const result = await this.service.getPinnedDashboards(userId, companyId);
       return sendResponse(res, 200, 'Pinned dashboards retrieved successfully', result);
     } catch (error) {
-      logger.error('Get pinned dashboards error:', error);
+      logger.error('❌ Get pinned dashboards error:', error);
       return this.handleError(res, error);
     }
   }
@@ -221,18 +273,24 @@ class DashboardController extends BaseController {
   async getMetrics(req, res) {
     try {
       const { id } = req.params;
-      // ✅ استخدام companyId من الـ Body أو من الـ Auth
-      const companyId = req.body.companyId || req.companyId || req.query.companyId;
-      const userId = req.user.id;
+      // ✅ استخدام getCompanyId من الـ Helper
+      const companyId = getCompanyId(req);
+      const userId = req.user?.id;
 
       if (!companyId || !userId) {
         return sendUnauthorized(res, 'Unauthorized: user/company context missing from request');
       }
 
+      if (!isValidCompanyId(companyId)) {
+        return sendError(res, 400, 'Invalid company ID format. Must be ObjectId or start with "comp_"', {
+          received: companyId
+        });
+      }
+
       const result = await this.service.getDashboardMetrics(id, userId, companyId);
       return sendResponse(res, 200, 'Dashboard metrics retrieved successfully', result);
     } catch (error) {
-      logger.error('Get dashboard metrics error:', error);
+      logger.error('❌ Get dashboard metrics error:', error);
       return this.handleError(res, error);
     }
   }
@@ -240,18 +298,24 @@ class DashboardController extends BaseController {
   async refreshMetrics(req, res) {
     try {
       const { id } = req.params;
-      // ✅ استخدام companyId من الـ Body أو من الـ Auth
-      const companyId = req.body.companyId || req.companyId || req.query.companyId;
-      const userId = req.user.id;
+      // ✅ استخدام getCompanyId من الـ Helper
+      const companyId = getCompanyId(req);
+      const userId = req.user?.id;
 
       if (!companyId || !userId) {
         return sendUnauthorized(res, 'Unauthorized: user/company context missing from request');
       }
 
+      if (!isValidCompanyId(companyId)) {
+        return sendError(res, 400, 'Invalid company ID format. Must be ObjectId or start with "comp_"', {
+          received: companyId
+        });
+      }
+
       const result = await this.service.refreshDashboardMetrics(id, userId, companyId);
       return sendResponse(res, 200, 'Dashboard metrics refreshed successfully', result);
     } catch (error) {
-      logger.error('Refresh dashboard metrics error:', error);
+      logger.error('❌ Refresh dashboard metrics error:', error);
       return this.handleError(res, error);
     }
   }
@@ -261,12 +325,18 @@ class DashboardController extends BaseController {
   async update(req, res) {
     try {
       const { id } = req.params;
-      // ✅ استخدام companyId من الـ Body أو من الـ Auth
-      const companyId = req.body.companyId || req.companyId || req.query.companyId;
-      const userId = req.user.id;
+      // ✅ استخدام getCompanyId من الـ Helper
+      const companyId = getCompanyId(req);
+      const userId = req.user?.id;
 
       if (!companyId || !userId) {
         return sendUnauthorized(res, 'Unauthorized: user/company context missing from request');
+      }
+
+      if (!isValidCompanyId(companyId)) {
+        return sendError(res, 400, 'Invalid company ID format. Must be ObjectId or start with "comp_"', {
+          received: companyId
+        });
       }
 
       // ✅ منع تحديث companyId
@@ -276,7 +346,7 @@ class DashboardController extends BaseController {
       const result = await this.service.updateDashboard(id, body, userId, companyId);
       return sendResponse(res, 200, 'Dashboard updated successfully', result);
     } catch (error) {
-      logger.error('Update dashboard error:', error);
+      logger.error('❌ Update dashboard error:', error);
       return this.handleError(res, error);
     }
   }
@@ -284,18 +354,24 @@ class DashboardController extends BaseController {
   async setDefault(req, res) {
     try {
       const { id } = req.params;
-      // ✅ استخدام companyId من الـ Body أو من الـ Auth
-      const companyId = req.body.companyId || req.companyId || req.query.companyId;
-      const userId = req.user.id;
+      // ✅ استخدام getCompanyId من الـ Helper
+      const companyId = getCompanyId(req);
+      const userId = req.user?.id;
 
       if (!companyId || !userId) {
         return sendUnauthorized(res, 'Unauthorized: user/company context missing from request');
       }
 
+      if (!isValidCompanyId(companyId)) {
+        return sendError(res, 400, 'Invalid company ID format. Must be ObjectId or start with "comp_"', {
+          received: companyId
+        });
+      }
+
       const result = await this.service.setDefaultDashboard(id, userId, companyId);
       return sendResponse(res, 200, 'Default dashboard set successfully', result);
     } catch (error) {
-      logger.error('Set default dashboard error:', error);
+      logger.error('❌ Set default dashboard error:', error);
       return this.handleError(res, error);
     }
   }
@@ -305,18 +381,24 @@ class DashboardController extends BaseController {
   async addWidget(req, res) {
     try {
       const { id } = req.params;
-      // ✅ استخدام companyId من الـ Body أو من الـ Auth
-      const companyId = req.body.companyId || req.companyId || req.query.companyId;
-      const userId = req.user.id;
+      // ✅ استخدام getCompanyId من الـ Helper
+      const companyId = getCompanyId(req);
+      const userId = req.user?.id;
 
       if (!companyId || !userId) {
         return sendUnauthorized(res, 'Unauthorized: user/company context missing from request');
       }
 
+      if (!isValidCompanyId(companyId)) {
+        return sendError(res, 400, 'Invalid company ID format. Must be ObjectId or start with "comp_"', {
+          received: companyId
+        });
+      }
+
       const result = await this.service.addWidget(id, req.body, userId, companyId);
       return sendResponse(res, 200, 'Widget added successfully', result);
     } catch (error) {
-      logger.error('Add widget error:', error);
+      logger.error('❌ Add widget error:', error);
       return this.handleError(res, error);
     }
   }
@@ -324,18 +406,24 @@ class DashboardController extends BaseController {
   async removeWidget(req, res) {
     try {
       const { id, widgetId } = req.params;
-      // ✅ استخدام companyId من الـ Body أو من الـ Auth
-      const companyId = req.body.companyId || req.companyId || req.query.companyId;
-      const userId = req.user.id;
+      // ✅ استخدام getCompanyId من الـ Helper
+      const companyId = getCompanyId(req);
+      const userId = req.user?.id;
 
       if (!companyId || !userId) {
         return sendUnauthorized(res, 'Unauthorized: user/company context missing from request');
       }
 
+      if (!isValidCompanyId(companyId)) {
+        return sendError(res, 400, 'Invalid company ID format. Must be ObjectId or start with "comp_"', {
+          received: companyId
+        });
+      }
+
       const result = await this.service.removeWidget(id, widgetId, userId, companyId);
       return sendResponse(res, 200, 'Widget removed successfully', result);
     } catch (error) {
-      logger.error('Remove widget error:', error);
+      logger.error('❌ Remove widget error:', error);
       return this.handleError(res, error);
     }
   }
@@ -343,18 +431,24 @@ class DashboardController extends BaseController {
   async updateWidget(req, res) {
     try {
       const { id, widgetId } = req.params;
-      // ✅ استخدام companyId من الـ Body أو من الـ Auth
-      const companyId = req.body.companyId || req.companyId || req.query.companyId;
-      const userId = req.user.id;
+      // ✅ استخدام getCompanyId من الـ Helper
+      const companyId = getCompanyId(req);
+      const userId = req.user?.id;
 
       if (!companyId || !userId) {
         return sendUnauthorized(res, 'Unauthorized: user/company context missing from request');
       }
 
+      if (!isValidCompanyId(companyId)) {
+        return sendError(res, 400, 'Invalid company ID format. Must be ObjectId or start with "comp_"', {
+          received: companyId
+        });
+      }
+
       const result = await this.service.updateWidget(id, widgetId, req.body, userId, companyId);
       return sendResponse(res, 200, 'Widget updated successfully', result);
     } catch (error) {
-      logger.error('Update widget error:', error);
+      logger.error('❌ Update widget error:', error);
       return this.handleError(res, error);
     }
   }
@@ -362,19 +456,25 @@ class DashboardController extends BaseController {
   async reorderWidgets(req, res) {
     try {
       const { id } = req.params;
-      // ✅ استخدام companyId من الـ Body أو من الـ Auth
-      const companyId = req.body.companyId || req.companyId || req.query.companyId;
-      const userId = req.user.id;
+      // ✅ استخدام getCompanyId من الـ Helper
+      const companyId = getCompanyId(req);
+      const userId = req.user?.id;
 
       if (!companyId || !userId) {
         return sendUnauthorized(res, 'Unauthorized: user/company context missing from request');
+      }
+
+      if (!isValidCompanyId(companyId)) {
+        return sendError(res, 400, 'Invalid company ID format. Must be ObjectId or start with "comp_"', {
+          received: companyId
+        });
       }
 
       const { widgetIds } = req.body;
       const result = await this.service.reorderWidgets(id, widgetIds, userId, companyId);
       return sendResponse(res, 200, 'Widgets reordered successfully', result);
     } catch (error) {
-      logger.error('Reorder widgets error:', error);
+      logger.error('❌ Reorder widgets error:', error);
       return this.handleError(res, error);
     }
   }
@@ -384,19 +484,25 @@ class DashboardController extends BaseController {
   async delete(req, res) {
     try {
       const { id } = req.params;
-      // ✅ استخدام companyId من الـ Body أو من الـ Auth
-      const companyId = req.body.companyId || req.companyId || req.query.companyId;
-      const userId = req.user.id;
+      // ✅ استخدام getCompanyId من الـ Helper
+      const companyId = getCompanyId(req);
+      const userId = req.user?.id;
 
       if (!companyId || !userId) {
         return sendUnauthorized(res, 'Unauthorized: user/company context missing from request');
+      }
+
+      if (!isValidCompanyId(companyId)) {
+        return sendError(res, 400, 'Invalid company ID format. Must be ObjectId or start with "comp_"', {
+          received: companyId
+        });
       }
 
       const { reason } = req.body;
       const result = await this.service.deleteDashboard(id, userId, companyId, reason);
       return sendDeleted(res, 'Dashboard deleted successfully');
     } catch (error) {
-      logger.error('Delete dashboard error:', error);
+      logger.error('❌ Delete dashboard error:', error);
       return this.handleError(res, error);
     }
   }
@@ -405,18 +511,64 @@ class DashboardController extends BaseController {
 
   async getStats(req, res) {
     try {
-      // ✅ استخدام companyId من الـ Body أو من الـ Auth
-      const companyId = req.body.companyId || req.companyId || req.query.companyId;
-      const userId = req.user.id;
+      // ✅ استخدام getCompanyId من الـ Helper
+      const companyId = getCompanyId(req);
+      const userId = req.user?.id;
 
       if (!companyId || !userId) {
         return sendUnauthorized(res, 'Unauthorized: user/company context missing from request');
       }
 
+      if (!isValidCompanyId(companyId)) {
+        return sendError(res, 400, 'Invalid company ID format. Must be ObjectId or start with "comp_"', {
+          received: companyId
+        });
+      }
+
       const result = await this.service.getDashboardStats(userId, companyId);
       return sendResponse(res, 200, 'Dashboard statistics retrieved successfully', result);
     } catch (error) {
-      logger.error('Get dashboard stats error:', error);
+      logger.error('❌ Get dashboard stats error:', error);
+      return this.handleError(res, error);
+    }
+  }
+
+  // ============ COPY ============
+
+  async copy(req, res) {
+    try {
+      const { id } = req.params;
+      // ✅ استخدام getCompanyId من الـ Helper
+      const companyId = getCompanyId(req);
+      const userId = req.user?.id;
+
+      if (!companyId || !userId) {
+        return sendUnauthorized(res, 'Unauthorized: user/company context missing from request');
+      }
+
+      if (!isValidCompanyId(companyId)) {
+        return sendError(res, 400, 'Invalid company ID format. Must be ObjectId or start with "comp_"', {
+          received: companyId
+        });
+      }
+
+      // ✅ التحقق من وجود اللوحة الأصلية
+      const { default: Dashboard } = require('../models/Dashboard.model');
+      const original = await Dashboard.findOne({
+        _id: id,
+        companyId,
+        userId,
+        deletedAt: null
+      });
+
+      if (!original) {
+        return sendNotFound(res, 'Dashboard not found');
+      }
+
+      const result = await this.service.copyDashboard(id, userId, companyId, req.body.name);
+      return sendResponse(res, 200, 'Dashboard copied successfully', result);
+    } catch (error) {
+      logger.error('❌ Copy dashboard error:', error);
       return this.handleError(res, error);
     }
   }
@@ -425,12 +577,18 @@ class DashboardController extends BaseController {
 
   async export(req, res) {
     try {
-      // ✅ استخدام companyId من الـ Body أو من الـ Auth
-      const companyId = req.body.companyId || req.companyId || req.query.companyId;
-      const userId = req.user.id;
+      // ✅ استخدام getCompanyId من الـ Helper
+      const companyId = getCompanyId(req);
+      const userId = req.user?.id;
 
       if (!companyId || !userId) {
         return sendUnauthorized(res, 'Unauthorized: user/company context missing from request');
+      }
+
+      if (!isValidCompanyId(companyId)) {
+        return sendError(res, 400, 'Invalid company ID format. Must be ObjectId or start with "comp_"', {
+          received: companyId
+        });
       }
 
       const { format = 'json' } = req.query;
@@ -445,7 +603,7 @@ class DashboardController extends BaseController {
       
       return sendResponse(res, 200, 'Dashboards exported successfully', data);
     } catch (error) {
-      logger.error('Export dashboards error:', error);
+      logger.error('❌ Export dashboards error:', error);
       return this.handleError(res, error);
     }
   }
