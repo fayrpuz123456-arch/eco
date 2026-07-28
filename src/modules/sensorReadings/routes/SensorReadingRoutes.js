@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const SensorReading = require('../models/SensorReading.model');
-const Sensor = require('../models/Sensor.model');
+const Sensor = require('../../sensors/models/Sensor.model'); // ✅ المسار الصحيح
 const { authMiddleware } = require('../../../core/middleware/auth');
 const { tenantMiddleware } = require('../../../core/middleware/tenant');
 const { getCompanyId, isValidCompanyId } = require('../../../core/utils/tenantHelper');
@@ -25,7 +25,6 @@ router.post('/', async (req, res) => {
       });
     }
 
-    // ✅ التحقق من صحة companyId
     if (!isValidCompanyId(companyId)) {
       return res.status(400).json({
         success: false,
@@ -55,7 +54,6 @@ router.post('/', async (req, res) => {
       });
     }
 
-    // ✅ التحقق من وجود factoryId و machineId
     if (!factoryId) {
       return res.status(400).json({
         success: false,
@@ -134,10 +132,10 @@ router.post('/', async (req, res) => {
   }
 });
 
-// ===== GET - قراءات حساس معين =====
+// ===== باقي الـ Routes (نفسها) =====
+// GET - قراءات حساس معين
 router.get('/sensor/:sensorId', async (req, res) => {
   try {
-    // ✅ استخدام getCompanyId من الـ Helper
     const companyId = getCompanyId(req);
 
     if (!companyId) {
@@ -159,12 +157,7 @@ router.get('/sensor/:sensorId', async (req, res) => {
     const { limit = 100, from, to, page = 1 } = req.query;
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
-    const query = { 
-      sensorId,
-      companyId,
-      deletedAt: null 
-    };
-    
+    const query = { sensorId, companyId, deletedAt: null };
     if (from) query.timestamp = { $gte: new Date(from) };
     if (to) query.timestamp = { ...query.timestamp, $lte: new Date(to) };
 
@@ -201,10 +194,9 @@ router.get('/sensor/:sensorId', async (req, res) => {
   }
 });
 
-// ===== GET - آخر قراءة لحساس =====
+// GET - آخر قراءة لحساس
 router.get('/sensor/:sensorId/latest', async (req, res) => {
   try {
-    // ✅ استخدام getCompanyId من الـ Helper
     const companyId = getCompanyId(req);
 
     if (!companyId) {
@@ -254,10 +246,9 @@ router.get('/sensor/:sensorId/latest', async (req, res) => {
   }
 });
 
-// ===== GET - قراءات ماكينة معينة =====
+// GET - قراءات ماكينة معينة
 router.get('/machine/:machineId', async (req, res) => {
   try {
-    // ✅ استخدام getCompanyId من الـ Helper
     const companyId = getCompanyId(req);
 
     if (!companyId) {
@@ -279,12 +270,7 @@ router.get('/machine/:machineId', async (req, res) => {
     const { limit = 100, from, to, page = 1 } = req.query;
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
-    const query = {
-      machineId,
-      companyId,
-      deletedAt: null
-    };
-
+    const query = { machineId, companyId, deletedAt: null };
     if (from) query.timestamp = { $gte: new Date(from) };
     if (to) query.timestamp = { ...query.timestamp, $lte: new Date(to) };
 
@@ -321,10 +307,9 @@ router.get('/machine/:machineId', async (req, res) => {
   }
 });
 
-// ===== GET - قراءة بالمعرف =====
+// GET - قراءة بالمعرف
 router.get('/:id', async (req, res) => {
   try {
-    // ✅ استخدام getCompanyId من الـ Helper
     const companyId = getCompanyId(req);
 
     if (!companyId) {
@@ -370,10 +355,9 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-// ===== GET - إحصائيات قراءات حساس =====
+// GET - إحصائيات قراءات حساس
 router.get('/stats/:sensorId', async (req, res) => {
   try {
-    // ✅ استخدام getCompanyId من الـ Helper
     const companyId = getCompanyId(req);
 
     if (!companyId) {
@@ -394,12 +378,7 @@ router.get('/stats/:sensorId', async (req, res) => {
     const { sensorId } = req.params;
     const { from, to } = req.query;
 
-    const query = { 
-      sensorId,
-      companyId,
-      deletedAt: null 
-    };
-    
+    const query = { sensorId, companyId, deletedAt: null };
     if (from) query.timestamp = { $gte: new Date(from) };
     if (to) query.timestamp = { ...query.timestamp, $lte: new Date(to) };
 
@@ -446,10 +425,9 @@ router.get('/stats/:sensorId', async (req, res) => {
   }
 });
 
-// ===== DELETE - حذف قراءة (Soft Delete) =====
+// DELETE - حذف قراءة (Soft Delete)
 router.delete('/:id', async (req, res) => {
   try {
-    // ✅ استخدام getCompanyId من الـ Helper
     const companyId = getCompanyId(req);
     const userId = req.user?.id;
 
