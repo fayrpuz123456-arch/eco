@@ -87,6 +87,7 @@ class App {
       // ============ إعداد Socket.IO (إذا كان مفعلاً) ============
       if (config.features.enableSocket) {
         logger.info('🔍 Setting up Socket.IO...');
+        // سيتم تهيئته بعد بدء الخادم
       }
 
       // ============ إعداد معالجة الأخطاء ============
@@ -105,6 +106,7 @@ class App {
     try {
       const models = [];
 
+      // محاولة استيراد جميع الـ Models
       const modelPaths = [
         './modules/users/models/User.model',
         './modules/companies/models/Company.model',
@@ -257,8 +259,10 @@ class App {
   }
 
   setupRoutes() {
+    // API Versioning
     const apiV1 = express.Router();
 
+    // ===== Import All Routes =====
     const routes = [
       { name: 'users', path: './modules/users/routes/UserRoutes' },
       { name: 'companies', path: './modules/companies/routes/CompanyRoutes' },
@@ -275,9 +279,13 @@ class App {
       { name: 'notifications', path: './modules/notifications/routes/NotificationRoutes' },
       { name: 'reports', path: './modules/reports/routes/ReportRoutes' },
       { name: 'dashboards', path: './modules/dashboard/routes/DashboardRoutes' },
+      // ===== Production Lines =====
       { name: 'production-lines', path: './modules/productionLines/routes/ProductionLineRoutes' },
+      // ===== Exchange =====
       { name: 'exchange', path: './modules/exchange/routes/ExchangeRoutes' },
+      // ===== Heat Recovery =====
       { name: 'heat-recovery', path: './modules/heatRecovery/routes/HeatRecoveryRoutes' },
+      // ===== AI =====
       { name: 'ai', path: './modules/ai/routes/AIRoutes' },
     ];
 
@@ -297,6 +305,7 @@ class App {
 
     logger.info(`📊 Total routes loaded: ${loadedCount}/${routes.length}`);
 
+    // ===== Base route =====
     apiV1.get('/', (req, res) => {
       res.json({
         success: true,
@@ -310,6 +319,7 @@ class App {
       });
     });
 
+    // ===== API Info =====
     apiV1.get('/info', (req, res) => {
       res.json({
         name: config.appName || 'EcoGuardian',
@@ -320,8 +330,10 @@ class App {
       });
     });
 
+    // Mount API routes
     this.app.use('/api/v1', apiV1);
 
+    // 404 handler
     this.app.use((req, res) => {
       res.status(404).json({
         success: false,
@@ -334,23 +346,30 @@ class App {
   }
 
   setupErrorHandling() {
+    // Global error handler
     this.app.use(errorHandler);
 
+    // Unhandled promise rejections
     process.on('unhandledRejection', (error) => {
       logger.error('❌ Unhandled promise rejection:', error);
     });
 
+    // Uncaught exceptions
     process.on('uncaughtException', (error) => {
       logger.error('❌ Uncaught exception:', error);
+      // نغلق التطبيق بأمان
       this.shutdown().then(() => {
         process.exit(1);
       });
     });
+
+    // SIGTERM و SIGINT معالجين في start()
   }
 
   start() {
     const port = config.port || 3000;
     
+    // ============ إنشاء خادم HTTP ============
     this.server = this.app.listen(port, () => {
       logger.info(`🚀 EcoGuardian server running on port ${port}`);
       logger.info(`📚 Environment: ${config.env || 'development'}`);
@@ -359,6 +378,7 @@ class App {
       logger.info(`📊 Features: ${Object.keys(config.features).filter(k => config.features[k]).join(', ') || 'none'}`);
     });
 
+    // ============ تهيئة Socket.IO (إذا كان مفعلاً) ============
     if (config.features.enableSocket) {
       try {
         const socketService = require('./config/socket');
@@ -369,6 +389,7 @@ class App {
       }
     }
 
+    // ============ Graceful Shutdown ============
     process.on('SIGTERM', () => this.shutdown());
     process.on('SIGINT', () => this.shutdown());
   }
@@ -378,6 +399,7 @@ class App {
     const shutdownPromises = [];
 
     try {
+      // ============ إغلاق Socket.IO ============
       if (this.io) {
         shutdownPromises.push(
           new Promise((resolve) => {
@@ -389,6 +411,7 @@ class App {
         );
       }
 
+      // ============ إغلاق MQTT ============
       if (mqttService.isConnectedToBroker && mqttService.isConnectedToBroker()) {
         shutdownPromises.push(
           new Promise((resolve) => {
@@ -403,6 +426,7 @@ class App {
         );
       }
 
+      // ============ إغلاق Redis ============
       if (redisService.isConnectedToRedis && redisService.isConnectedToRedis()) {
         shutdownPromises.push(
           new Promise(async (resolve) => {
@@ -417,6 +441,7 @@ class App {
         );
       }
 
+      // ============ إغلاق Database ============
       shutdownPromises.push(
         new Promise(async (resolve) => {
           try {
@@ -429,6 +454,7 @@ class App {
         })
       );
 
+      // ============ إغلاق HTTP Server ============
       if (this.server) {
         shutdownPromises.push(
           new Promise((resolve) => {
@@ -440,6 +466,7 @@ class App {
         );
       }
 
+      // انتظار جميع عمليات الإغلاق
       await Promise.all(shutdownPromises);
 
       logger.info('✅ Server shutdown completed successfully');
