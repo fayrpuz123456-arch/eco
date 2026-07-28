@@ -794,4 +794,289 @@ router.post('/analyze/whatif', async (req, res) => {
   }
 });
 
+// ===== 11. Real-time Analysis (التحليل الفوري) =====
+router.post('/analyze/real-time', async (req, res) => {
+  try {
+    const companyId = getCompanyId(req);
+    
+    if (!companyId || !isValidCompanyId(companyId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid company ID'
+      });
+    }
+
+    const { machineId, sensorIds } = req.body;
+
+    if (!machineId) {
+      return res.status(400).json({
+        success: false,
+        message: 'machineId is required'
+      });
+    }
+
+    // 1. جلب أحدث القراءات للماكينة
+    const SensorReading = require('../../sensorReadings/models/SensorReading.model');
+    const query = { 
+      machineId, 
+      companyId, 
+      deletedAt: null 
+    };
+
+    if (sensorIds && sensorIds.length > 0) {
+      query.sensorId = { $in: sensorIds };
+    }
+
+    // جلب آخر 30 قراءة
+    const readings = await SensorReading.find(query)
+      .sort({ timestamp: -1 })
+      .limit(30)
+      .lean();
+
+    if (readings.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'No readings found for this machine'
+      });
+    }
+
+    // 2. تجميع القراءات حسب الحساس
+    const groupedReadings = {};
+    readings.forEach(r => {
+      if (!groupedReadings[r.sensorId]) {
+        groupedReadings[r.sensorId] = [];
+      }
+      groupedReadings[r.sensorId].push({
+        timestamp: r.timestamp,
+        value: r.value,
+        unit: r.unit
+      });
+    });
+
+    // 3. إرسال للـ AI Service للتحليل الفوري
+    const aiResponse = await axios.post(
+      `${AI_SERVICE_URL}/api/v1/analyze/real-time`,
+      {
+        machineId,
+        readings: groupedReadings,
+        timestamp: new Date().toISOString()
+      },
+      {
+        headers: {
+          'x-company-id': companyId,
+          'Content-Type': 'application/json'
+        },
+        timeout: 30000
+      }
+    );
+
+    res.json({
+      success: true,
+      message: 'Real-time analysis completed',
+      data: {
+        machineId,
+        timestamp: new Date().toISOString(),
+        analysis: aiResponse.data,
+        readings: {
+          count: readings.length,
+          latest: readings[0] || null
+        }
+      }
+    });
+
+  } catch (error) {
+    logger.error('❌ Real-time analysis error:', error.message);
+    
+    if (error.response) {
+      return res.status(error.response.status).json({
+        success: false,
+        message: 'AI Service error',
+        error: error.response.data
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      message: 'Error performing real-time analysis',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
+  }
+});
+
+// ===== 12. Ask AI (سؤال للـ AI) =====
+router.post('/ask', async (req, res) => {
+  try {
+    const companyId = getCompanyId(req);
+    
+    if (!companyId || !isValidCompanyId(companyId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid company ID'
+      });
+    }
+
+    const { question, machineId, context } = req.body;
+
+    if (!question) {
+      return res.status(400).json({
+        success: false,
+        message: 'question is required'
+      });
+    }
+
+    // جلب السياق (القراءات الحديثة) لو مش موجود
+    let readingsContext = context;
+    if (!readingsContext && machineId) {
+      const SensorReading = require('../../sensorReadings/models/SensorReading.model');
+      const readings = await SensorReading.find({
+        machineId,
+        companyId,
+        deletedAt: null
+      })
+      .sort({ timestamp: -1 })
+      .limit(50)
+      .lean();
+      
+      readingsContext = readings.map(r => ({
+        sensorId: r.sensorId,
+        value: r.value,
+        unit: r.unit,
+        timestamp: r.timestamp
+      }));
+    }
+
+    // إرسال للـ AI Service
+    const aiResponse = await axios.post(
+      `${AI_SERVICE_URL}/api/v1/ask`,
+      {
+        question,
+        context: readingsContext || [],
+        machineId: machineId || null,
+        timestamp: new Date().toISOString()
+      },
+      {
+        headers: {
+          'x-company-id': companyId,
+          'Content-Type': 'application/json'
+        },
+        timeout: 30000
+      }
+    );
+
+    res.json({
+      success: true,
+      message: 'AI response generated',
+      data: {
+        question,
+        answer: aiResponse.data.answer || aiResponse.data,
+        timestamp: new Date().toISOString(),
+        context: {
+          readingsCount: readingsContext ? readingsContext.length : 0,
+          machineId: machineId || null
+        }
+      }
+    });
+
+  } catch (error) {
+    logger.error('❌ AI Ask error:', error.message);
+    
+    if (error.response) {
+      return res.status(error.response.status).json({
+        success: false,
+        message: 'AI Service error',
+        error: error.response.data
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      message: 'Error getting AI response',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
+  }
+});
+
+// ===== 13. Dashboard AI Summary =====
+router.get('/dashboard-summary', async (req, res) => {
+  try {
+    const companyId = getCompanyId(req);
+    
+    if (!companyId || !isValidCompanyId(companyId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid company ID'
+      });
+    }
+
+    const { factoryId, machineId } = req.query;
+
+    // جلب جميع القراءات الحديثة
+    const SensorReading = require('../../sensorReadings/models/SensorReading.model');
+    const query = { companyId, deletedAt: null };
+    if (factoryId) query.factoryId = factoryId;
+    if (machineId) query.machineId = machineId;
+
+    const readings = await SensorReading.find(query)
+      .sort({ timestamp: -1 })
+      .limit(100)
+      .lean();
+
+    if (readings.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'No readings found'
+      });
+    }
+
+    // إرسال للـ AI Service
+    const aiResponse = await axios.post(
+      `${AI_SERVICE_URL}/api/v1/dashboard-summary`,
+      {
+        readings,
+        factoryId: factoryId || null,
+        machineId: machineId || null,
+        timestamp: new Date().toISOString()
+      },
+      {
+        headers: {
+          'x-company-id': companyId,
+          'Content-Type': 'application/json'
+        },
+        timeout: 30000
+      }
+    );
+
+    res.json({
+      success: true,
+      message: 'Dashboard AI summary generated',
+      data: {
+        summary: aiResponse.data,
+        timestamp: new Date().toISOString(),
+        metrics: {
+          totalReadings: readings.length,
+          factoryId: factoryId || 'all',
+          machineId: machineId || 'all'
+        }
+      }
+    });
+
+  } catch (error) {
+    logger.error('❌ Dashboard AI summary error:', error.message);
+    
+    if (error.response) {
+      return res.status(error.response.status).json({
+        success: false,
+        message: 'AI Service error',
+        error: error.response.data
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      message: 'Error generating dashboard summary',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
+  }
+});
+
 module.exports = router;
