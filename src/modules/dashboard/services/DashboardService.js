@@ -62,6 +62,11 @@ class DashboardService extends BaseService {
   }
 
   // ============ FIND ============
+  // ✅ ملاحظة مهمة:
+  // getDashboardById و getDefaultDashboard بيرجعوا الـ widgets "لايف" دايماً
+  // (مبنية من collectRealMetrics() في كل Request) وده مقصود ومطلوب:
+  // كل GET بيجيب أحدث قيم من السنسورز/التنبيهات مباشرة من قاعدة البيانات
+  // من غير أي كاش، عشان الداشبورد يفضل محدّث تلقائياً كل ما الفرونت يعمل refresh/polling.
 
   async getDashboardById(id, userId, companyId) {
     const dashboard = await this.repository.findById(id, companyId);
@@ -309,16 +314,16 @@ class DashboardService extends BaseService {
   }
 
   // ============ METRICS ============
+  // ✅ تم إلغاء الاعتماد على metricsCache هنا لأن المطلوب "كله لايف يتحدث تلقائيا".
+  // الكاش كان بيرجع بيانات قديمة لو موجودة بدل ما يجيب بيانات حديثة، وده بيعارض
+  // فكرة اللايف أبدياً. دلوقتي كل نداء بيجيب بيانات حقيقية طازة، وبرضه بيحدّث
+  // الكاش في الخلفية (فيدا استخدمها أي كود تاني محتاج قراءة سريعة من الكاش).
 
   async getDashboardMetrics(id, userId, companyId) {
     try {
       const dashboard = await this.repository.findById(id, companyId);
       if (!dashboard || dashboard.userId !== userId) {
         throw new NotFoundError('Dashboard not found');
-      }
-
-      if (dashboard.metricsCache && Object.keys(dashboard.metricsCache).length > 0) {
-        return dashboard.metricsCache;
       }
 
       const metrics = await this.collectMetrics(dashboard);
@@ -357,6 +362,8 @@ class DashboardService extends BaseService {
 
   /**
    * جمع البيانات الحقيقية من قاعدة البيانات
+   * ✅ تم زيادة limit السنسورز عشان كل السنسورز (Temperature/Humidity/Air Quality...)
+   * تظهر في الداشبورد مش أول 10 بس، وضفنا readings كاملة (min/max/lastValue) لو متاحة.
    */
   async collectRealMetrics(userId, companyId) {
     try {
@@ -396,9 +403,10 @@ class DashboardService extends BaseService {
         Report.countDocuments({ companyId, deletedAt: null })
       ]);
 
+      // ✅ نجيب كل السنسورز النشطة (مش أول 10 بس) عشان كل نوع (حرارة/رطوبة/هواء) يظهر لايف
       const recentSensors = await Sensor.find({ companyId, deletedAt: null })
         .sort({ createdAt: -1 })
-        .limit(10)
+        .limit(50)
         .lean();
 
       const recentAlerts = await Alert.find({
@@ -443,7 +451,9 @@ class DashboardService extends BaseService {
   // ============ 🎨 BUILD DYNAMIC WIDGETS ============
 
   /**
-   * بناء الـ Widgets ديناميكياً مع السنسورز الحقيقية
+   * بناء الـ Widgets ديناميكياً مع السنسورز الحقيقية - لايف بالكامل.
+   * ✅ كل widget دلوقتي بيرجع بالشكل الكامل: data + config + size + position +
+   * isVisible + refreshInterval، بدل ما يرجع بس id/type/title.
    */
   buildDynamicWidgets(metrics) {
     // KPI Widgets
@@ -530,7 +540,7 @@ class DashboardService extends BaseService {
       }
     ];
 
-    // Sensor Widgets
+    // Sensor Widgets - كل سنسور بياخد widget لايف بالـ value/الحالة الحقيقية
     const sensorWidgets = (metrics.recentSensors || []).map((sensor, index) => ({
       id: `sensor_${sensor._id || index}`,
       title: sensor.name || `Sensor ${index + 1}`,
@@ -541,8 +551,18 @@ class DashboardService extends BaseService {
         icon: this.getSensorIcon(sensor.type),
         status: sensor.status || 'active',
         sensorId: sensor._id,
-        lastReadingAt: sensor.readings?.lastReadingAt || null
-      }
+        lastReadingAt: sensor.readings?.lastReadingAt || null,
+        minValue: sensor.readings?.minValue ?? null,
+        maxValue: sensor.readings?.maxValue ?? null
+      },
+      config: {
+        sensorType: sensor.type || null,
+        factoryId: sensor.factoryId || null,
+        machineId: sensor.machineId || null,
+        thresholds: sensor.thresholds || sensor.config?.thresholds || null
+      },
+      refreshInterval: 10, // ✅ تحديث كل 10 ثواني افتراضياً للسنسورز الحية
+      isVisible: true
     }));
 
     // Alert Widgets
@@ -557,7 +577,13 @@ class DashboardService extends BaseService {
         icon: this.getAlertIcon(alert.severity),
         alertId: alert._id,
         triggeredAt: alert.triggeredAt || null
-      }
+      },
+      config: {
+        sensorId: alert.sensorId || null,
+        machineId: alert.machineId || null
+      },
+      refreshInterval: 15,
+      isVisible: true
     }));
 
     const allWidgets = [...kpiWidgets, ...sensorWidgets, ...alertWidgets];
@@ -609,21 +635,32 @@ class DashboardService extends BaseService {
   }
 
   // ============ 🛡️ SANITIZE DATA ============
+  // ✅ بنحافظ دلوقتي على كل حقول الـ widget (config/size/position/refreshInterval/isVisible)
+  // بدل ما نرجع بس id/type/title/data زي الأول.
 
   sanitizeWidgetData(widget) {
     if (!widget) return null;
 
     const data = widget.data || {};
+    const config = widget.config || {};
 
     return {
-      ...widget,
+      id: widget.id,
+      type: widget.type,
+      title: widget.title,
+      description: widget.description ?? null,
+      size: widget.size || { width: 2, height: 2 },
+      position: widget.position || { x: 0, y: 0 },
+      isVisible: widget.isVisible ?? true,
+      refreshInterval: widget.refreshInterval ?? 30,
       data: {
         ...data,
         value: data.value ?? 0,
         unit: data.unit ?? '',
         icon: data.icon ?? '📡',
         status: data.status ?? 'normal'
-      }
+      },
+      config
     };
   }
 
