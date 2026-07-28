@@ -107,8 +107,8 @@ class DashboardService extends BaseService {
     if (!dashboard) {
       // ✅ استخدام اسم المستخدم بدلاً من "My Dashboard" الثابت
       const user = await this.getUser(userId);
-      const defaultName = user?.displayName 
-        ? `${user.displayName}'s Dashboard` 
+      const defaultName = user?.displayName
+        ? `${user.displayName}'s Dashboard`
         : 'My Dashboard';
 
       const defaultData = {
@@ -362,8 +362,22 @@ class DashboardService extends BaseService {
 
   /**
    * جمع البيانات الحقيقية من قاعدة البيانات
-   * ✅ تم زيادة limit السنسورز عشان كل السنسورز (Temperature/Humidity/Air Quality...)
-   * تظهر في الداشبورد مش أول 10 بس، وضفنا readings كاملة (min/max/lastValue) لو متاحة.
+   *
+   * ✅✅ FIX (المشكلة الأساسية اللي كانت بتمنع ظهور/تحديث ويدجت السينسورز):
+   * الكود القديم كان بيبني recentSensors بالاعتماد الكامل على كوليكشن Sensor
+   * (Sensor.find({ companyId, deletedAt: null })). المشكلة إن أرقام الـ metrics
+   * اللي بتوصلنا (totalSensors: 0, totalMachines: 0) وهي بتزيد totalReadings
+   * بشكل طبيعي بتأكد إن مستندات Sensor نفسها مش موجودة/مش متطابقة مع الـ
+   * companyId - رغم إن قراءات SensorReading بتتسجل صح.
+   *
+   * يعني القراءة بتتسجل في SensorReading collection، بس مفيش مستند Sensor
+   * متسجل أو متطابق بيمثلها، فـ recentSensors كانت بترجع فاضية دايماً، وبالتالي
+   * مفيش widget بيتبني للسينسور ولا القراءة بتظهر في الداشبورد.
+   *
+   * الحل: بدل ما نعتمد بس على Sensor collection، بنعمل aggregation مباشر على
+   * SensorReading نفسها ونجيب آخر قراءة لكل sensorId (لايف 100%)، وبعدين لو
+   * لقينا مستند Sensor مطابق بنستخدم بياناته (الاسم/النوع/الحالة)، ولو مش
+   * موجود بنبني بيانات افتراضية من القراءة نفسها عشان الويدجت تظهر برضو.
    */
   async collectRealMetrics(userId, companyId) {
     try {
@@ -378,7 +392,7 @@ class DashboardService extends BaseService {
       const Report = require('../../reports/models/Report.model');
 
       const [
-        totalSensors,
+        totalSensorsRegistered,
         activeAlerts,
         totalFactories,
         totalMachines,
@@ -403,11 +417,70 @@ class DashboardService extends BaseService {
         Report.countDocuments({ companyId, deletedAt: null })
       ]);
 
-      // ✅ نجيب كل السنسورز النشطة (مش أول 10 بس) عشان كل نوع (حرارة/رطوبة/هواء) يظهر لايف
-      const recentSensors = await Sensor.find({ companyId, deletedAt: null })
-        .sort({ createdAt: -1 })
-        .limit(50)
-        .lean();
+      // ✅ FIX: نجيب آخر قراءة لكل sensorId مباشرة من SensorReading (مش من Sensor)
+      // عشان تكون لايف فعلياً حتى لو مستند الـ Sensor مش موجود/متطابق.
+      let liveSensorReadings = [];
+      try {
+        liveSensorReadings = await SensorReading.aggregate([
+          { $match: { companyId, deletedAt: null } },
+          { $sort: { createdAt: -1 } },
+          {
+            $group: {
+              _id: '$sensorId',
+              lastValue: { $first: '$value' },
+              unit: { $first: '$unit' },
+              quality: { $first: '$quality' },
+              lastReadingAt: { $first: '$createdAt' },
+              minValue: { $min: '$value' },
+              maxValue: { $max: '$value' },
+              factoryId: { $first: '$factoryId' },
+              machineId: { $first: '$machineId' },
+              readingCount: { $sum: 1 }
+            }
+          },
+          { $sort: { lastReadingAt: -1 } },
+          { $limit: 50 }
+        ]);
+      } catch (aggError) {
+        logger.error('Error aggregating live sensor readings:', aggError);
+        liveSensorReadings = [];
+      }
+
+      // ✅ نجيب مستندات Sensor المطابقة (لو موجودة) عشان الاسم/النوع/الحالة/الـ thresholds
+      const sensorIds = liveSensorReadings.map(r => r._id).filter(Boolean);
+      const sensorDocs = sensorIds.length
+        ? await Sensor.find({ _id: { $in: sensorIds } }).lean()
+        : [];
+      const sensorDocsMap = new Map(sensorDocs.map(s => [String(s._id), s]));
+
+      // ✅ دمج بيانات القراءة الحية مع مستند الـ Sensor (لو موجود) في شكل واحد
+      // متوافق مع اللي buildDynamicWidgets بيتوقعه (sensor.readings.lastValue... إلخ)
+      const recentSensors = liveSensorReadings.map((reading) => {
+        const sensorDoc = sensorDocsMap.get(String(reading._id));
+        return {
+          _id: reading._id,
+          name: sensorDoc?.name || `Sensor ${String(reading._id).slice(0, 6)}`,
+          type: sensorDoc?.type || null,
+          unit: sensorDoc?.unit || reading.unit || '',
+          status: sensorDoc?.status || 'active',
+          factoryId: sensorDoc?.factoryId || reading.factoryId || null,
+          machineId: sensorDoc?.machineId || reading.machineId || null,
+          thresholds: sensorDoc?.thresholds || sensorDoc?.config?.thresholds || null,
+          readings: {
+            lastValue: reading.lastValue,
+            lastReadingAt: reading.lastReadingAt,
+            minValue: reading.minValue,
+            maxValue: reading.maxValue,
+            readingCount: reading.readingCount
+          }
+        };
+      });
+
+      // ✅ لو مفيش مستندات Sensor مسجلة رسمياً بس فيه قراءات فعلاً بتوصل،
+      // نعرض عدد السينسورز اللي فعلياً بتبعت بيانات بدل ما نعرض صفر مضلل.
+      const totalSensors = totalSensorsRegistered > 0
+        ? totalSensorsRegistered
+        : liveSensorReadings.length;
 
       const recentAlerts = await Alert.find({
         companyId,
