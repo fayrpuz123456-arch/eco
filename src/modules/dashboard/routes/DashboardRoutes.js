@@ -479,3 +479,4 @@ router.delete('/:id', checkPermissions([PERMISSIONS.DASHBOARD_DELETE]), async (r
 });
 
 module.exports = router;
+//new
