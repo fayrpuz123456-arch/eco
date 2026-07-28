@@ -217,155 +217,6 @@ dashboardSchema.virtual('widgetCount').get(function() {
   return this.widgets.filter(w => w.isVisible).length;
 });
 
-// ============ PRE-SAVE MIDDLEWARE ============
-// ✅ تم التعليق لأن BaseModel يوفر Pre-save middleware
-// تجنباً لتكرار Pre-save hooks
-
-/*
-dashboardSchema.pre('save', function(next) {
-  try {
-    this.updatedAt = new Date();
-    
-    if (this.name) this.name = this.name.trim();
-    if (this.description) this.description = this.description.trim();
-    
-    if (!this.name) {
-      return next(new Error('Name is required'));
-    }
-    
-    if (!this.userId) {
-      return next(new Error('User ID is required'));
-    }
-    
-    if (!this.companyId) {
-      return next(new Error('Company ID is required'));
-    }
-    
-    if (!this.type) {
-      return next(new Error('Type is required'));
-    }
-    
-    if (this.widgets && this.widgets.length > 0) {
-      const widgetIds = new Set();
-      for (const widget of this.widgets) {
-        if (!widget.id) {
-          widget.id = uuidv4();
-        }
-        if (widgetIds.has(widget.id)) {
-          return next(new Error(`Duplicate widget ID found: ${widget.id}`));
-        }
-        widgetIds.add(widget.id);
-        
-        if (widget.title) widget.title = widget.title.trim();
-        if (widget.description) widget.description = widget.description.trim();
-      }
-    }
-    
-    if (this.filters && this.filters.length > 0) {
-      const filterIds = new Set();
-      for (const filter of this.filters) {
-        if (!filter.id) {
-          return next(new Error('Filter ID is required'));
-        }
-        if (filterIds.has(filter.id)) {
-          return next(new Error(`Duplicate filter ID found: ${filter.id}`));
-        }
-        filterIds.add(filter.id);
-        
-        if (filter.name) filter.name = filter.name.trim();
-      }
-    }
-    
-    this.lastUpdated = new Date();
-    
-    return next();
-  } catch (error) {
-    return next(error);
-  }
-});
-*/
-
-// ============ PRE-VALIDATE MIDDLEWARE ============
-// ✅ تم التعليق لأن BaseModel يوفر Pre-validate
-
-/*
-dashboardSchema.pre('validate', function(next) {
-  try {
-    if (this.name) {
-      this.name = this.name.trim();
-    }
-    
-    if (this.description) {
-      this.description = this.description.trim();
-    }
-    
-    if (this.timePeriod) {
-      if (this.timePeriod.startDate && this.timePeriod.endDate) {
-        if (new Date(this.timePeriod.startDate) > new Date(this.timePeriod.endDate)) {
-          return next(new Error('Start date must be before end date'));
-        }
-      }
-      if (this.timePeriod.customRange) {
-        if (this.timePeriod.customRange.startDate && this.timePeriod.customRange.endDate) {
-          if (new Date(this.timePeriod.customRange.startDate) > new Date(this.timePeriod.customRange.endDate)) {
-            return next(new Error('Custom range start date must be before end date'));
-          }
-        }
-      }
-    }
-    
-    return next();
-  } catch (error) {
-    return next(error);
-  }
-});
-*/
-
-// ============ PRE-FINDONEANDUPDATE MIDDLEWARE ============
-// ✅ تم التعليق لأن BaseModel يوفر Pre-findOneAndUpdate
-
-/*
-dashboardSchema.pre('findOneAndUpdate', function(next) {
-  try {
-    this.set({ updatedAt: new Date() });
-    this.set({ lastUpdated: new Date() });
-    return next();
-  } catch (error) {
-    return next(error);
-  }
-});
-*/
-
-// ============ PRE-UPDATEONE MIDDLEWARE ============
-// ✅ تم التعليق لأن BaseModel يوفر Pre-updateOne
-
-/*
-dashboardSchema.pre('updateOne', function(next) {
-  try {
-    this.set({ updatedAt: new Date() });
-    this.set({ lastUpdated: new Date() });
-    return next();
-  } catch (error) {
-    return next(error);
-  }
-});
-*/
-
-// ============ PRE-UPDATEMANY MIDDLEWARE ============
-// ✅ تم التعليق لأن BaseModel يوفر Pre-updateMany
-
-/*
-dashboardSchema.pre('updateMany', function(next) {
-  try {
-    this.set({ updatedAt: new Date() });
-    this.set({ lastUpdated: new Date() });
-    return next();
-  } catch (error) {
-    return next(error);
-  }
-});
-*/
-
 // ============ POST-SAVE MIDDLEWARE ============
 
 dashboardSchema.post('save', function(doc) {
@@ -378,8 +229,6 @@ dashboardSchema.post('save', function(error, doc, next) {
   }
   next(error);
 });
-
-// ============ POST-FINDONEANDUPDATE MIDDLEWARE ============
 
 dashboardSchema.post('findOneAndUpdate', function(doc) {
   if (doc) {
@@ -468,7 +317,9 @@ dashboardSchema.methods.toPublicJSON = function() {
       size: w.size,
       position: w.position,
       isVisible: w.isVisible,
-      refreshInterval: w.refreshInterval
+      refreshInterval: w.refreshInterval,
+      data: w.data,      // ✅ إضافة data - مهم جداً للـ Frontend
+      config: w.config   // ✅ إضافة config
     })),
     filters: this.filters.map(f => ({
       id: f.id,
