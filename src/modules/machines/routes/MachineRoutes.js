@@ -10,8 +10,9 @@ const logger = require('../../../core/utils/logger');
 router.use(authMiddleware);
 router.use(tenantMiddleware(true));
 
-// ===== GET - قائمة الآلات =====
-router.get('/', async (req, res) => {
+// ===== GET - إحصائيات الآلات =====
+// ✅ لازم يكون قبل /:id عشان منتصادش معاه
+router.get('/stats', async (req, res) => {
   try {
     // ✅ استخدام getCompanyId من الـ Helper
     const companyId = getCompanyId(req);
@@ -31,57 +32,54 @@ router.get('/', async (req, res) => {
       });
     }
 
-    const { page = 1, limit = 10, factoryId, departmentId, status, search } = req.query;
-    const skip = (parseInt(page) - 1) * parseInt(limit);
-
-    // ✅ بناء الـ Query
-    const query = { companyId, deletedAt: null };
-    if (factoryId) query.factoryId = factoryId;
-    if (departmentId) query.departmentId = departmentId;
-    if (status) query.status = status;
-    if (search) {
-      query.$or = [
-        { name: { $regex: search, $options: 'i' } },
-        { code: { $regex: search, $options: 'i' } },
-        { type: { $regex: search, $options: 'i' } },
-        { model: { $regex: search, $options: 'i' } }
-      ];
-    }
-
-    const [machines, total] = await Promise.all([
-      Machine.find(query)
-        .select('-__v')
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(parseInt(limit)),
-      Machine.countDocuments(query)
+    const [total, active, inactive, online, offline, idle, maintenance, error] = await Promise.all([
+      Machine.countDocuments({ companyId, deletedAt: null }),
+      Machine.countDocuments({ companyId, status: 'active', deletedAt: null }),
+      Machine.countDocuments({ companyId, status: 'inactive', deletedAt: null }),
+      Machine.countDocuments({ companyId, operationalStatus: 'online', deletedAt: null }),
+      Machine.countDocuments({ companyId, operationalStatus: 'offline', deletedAt: null }),
+      Machine.countDocuments({ companyId, operationalStatus: 'idle', deletedAt: null }),
+      Machine.countDocuments({ companyId, operationalStatus: 'maintenance', deletedAt: null }),
+      Machine.countDocuments({ companyId, operationalStatus: 'error', deletedAt: null })
     ]);
-    
+
+    // ✅ إحصائيات إضافية حسب المصنع
+    const byFactory = await Machine.aggregate([
+      { $match: { companyId, deletedAt: null } },
+      { $group: { _id: '$factoryId', count: { $sum: 1 } } },
+      { $sort: { count: -1 } },
+      { $limit: 10 }
+    ]);
+
     res.json({
       success: true,
-      message: 'Machines retrieved successfully',
-      data: machines,
-      count: machines.length,
-      meta: {
-        page: parseInt(page),
-        limit: parseInt(limit),
+      message: 'Machine statistics retrieved successfully',
+      data: {
         total,
-        totalPages: Math.ceil(total / parseInt(limit)),
-        hasNext: skip + machines.length < total,
-        hasPrev: parseInt(page) > 1
+        active,
+        inactive,
+        operational: {
+          online,
+          offline,
+          idle,
+          maintenance,
+          error
+        },
+        byFactory
       }
     });
   } catch (error) {
-    logger.error('❌ GET /machines error:', error);
+    logger.error('❌ GET /machines/stats error:', error);
     res.status(500).json({
       success: false,
-      message: 'Error fetching machines',
+      message: 'Error fetching machine statistics',
       error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
 });
 
 // ===== GET - آلات حسب المصنع =====
+// ✅ لازم يكون قبل /:id عشان منتصادش معاه
 router.get('/factory/:factoryId', async (req, res) => {
   try {
     // ✅ استخدام getCompanyId من الـ Helper
@@ -125,6 +123,7 @@ router.get('/factory/:factoryId', async (req, res) => {
 });
 
 // ===== GET - آلات حسب القسم =====
+// ✅ لازم يكون قبل /:id عشان منتصادش معاه
 router.get('/department/:departmentId', async (req, res) => {
   try {
     // ✅ استخدام getCompanyId من الـ Helper
@@ -168,6 +167,7 @@ router.get('/department/:departmentId', async (req, res) => {
 });
 
 // ===== GET - آلات حسب خط الإنتاج =====
+// ✅ لازم يكون قبل /:id عشان منتصادش معاه
 router.get('/production-line/:productionLineId', async (req, res) => {
   try {
     // ✅ استخدام getCompanyId من الـ Helper
@@ -205,6 +205,233 @@ router.get('/production-line/:productionLineId', async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Error fetching machines by production line',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
+  }
+});
+
+// ===== GET - آلات حسب الحالة التشغيلية =====
+// ✅ لازم يكون قبل /:id عشان منتصادش معاه
+router.get('/operational/:status', async (req, res) => {
+  try {
+    // ✅ استخدام getCompanyId من الـ Helper
+    const companyId = getCompanyId(req);
+    
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'companyId مطلوب في الـ Body أو الـ Header (x-company-id) أو من الـ Auth'
+      });
+    }
+
+    if (!isValidCompanyId(companyId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
+        received: companyId
+      });
+    }
+
+    const validStatuses = ['online', 'offline', 'idle', 'maintenance', 'error'];
+    if (!validStatuses.includes(req.params.status)) {
+      return res.status(400).json({
+        success: false,
+        message: `Invalid operational status. Must be one of: ${validStatuses.join(', ')}`
+      });
+    }
+
+    const machines = await Machine.find({
+      operationalStatus: req.params.status,
+      companyId,
+      deletedAt: null
+    }).select('-__v');
+
+    res.json({
+      success: true,
+      message: 'Machines by operational status retrieved successfully',
+      data: machines,
+      count: machines.length
+    });
+  } catch (error) {
+    logger.error('❌ GET /machines/operational/:status error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching machines by operational status',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
+  }
+});
+
+// ===== GET - آلة بالكود =====
+// ✅ لازم يكون قبل /:id عشان منتصادش معاه
+router.get('/code/:code', async (req, res) => {
+  try {
+    // ✅ استخدام getCompanyId من الـ Helper
+    const companyId = getCompanyId(req);
+    
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'companyId مطلوب في الـ Body أو الـ Header (x-company-id) أو من الـ Auth'
+      });
+    }
+
+    if (!isValidCompanyId(companyId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
+        received: companyId
+      });
+    }
+
+    const code = req.params.code.toUpperCase();
+    const machine = await Machine.findOne({
+      code,
+      companyId,
+      deletedAt: null
+    });
+
+    if (!machine) {
+      return res.status(404).json({
+        success: false,
+        message: 'Machine not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Machine retrieved successfully',
+      data: machine
+    });
+  } catch (error) {
+    logger.error('❌ GET /machines/code/:code error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching machine by code',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
+  }
+});
+
+// ===== GET - قائمة الآلات =====
+router.get('/', async (req, res) => {
+  try {
+    // ✅ استخدام getCompanyId من الـ Helper
+    const companyId = getCompanyId(req);
+    
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'companyId مطلوب في الـ Body أو الـ Header (x-company-id) أو من الـ Auth'
+      });
+    }
+
+    if (!isValidCompanyId(companyId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
+        received: companyId
+      });
+    }
+
+    const { page = 1, limit = 10, factoryId, departmentId, productionLineId, status, operationalStatus, search } = req.query;
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    // ✅ بناء الـ Query
+    const query = { companyId, deletedAt: null };
+    if (factoryId) query.factoryId = factoryId;
+    if (departmentId) query.departmentId = departmentId;
+    if (productionLineId) query.productionLineId = productionLineId;
+    if (status) query.status = status;
+    if (operationalStatus) query.operationalStatus = operationalStatus;
+    if (search) {
+      query.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { code: { $regex: search, $options: 'i' } },
+        { type: { $regex: search, $options: 'i' } },
+        { model: { $regex: search, $options: 'i' } },
+        { serialNumber: { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    const [machines, total] = await Promise.all([
+      Machine.find(query)
+        .select('-__v')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(parseInt(limit)),
+      Machine.countDocuments(query)
+    ]);
+    
+    res.json({
+      success: true,
+      message: 'Machines retrieved successfully',
+      data: machines,
+      count: machines.length,
+      meta: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        totalPages: Math.ceil(total / parseInt(limit)),
+        hasNext: skip + machines.length < total,
+        hasPrev: parseInt(page) > 1
+      }
+    });
+  } catch (error) {
+    logger.error('❌ GET /machines error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching machines',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
+  }
+});
+
+// ===== GET - آلة بالمعرف =====
+// ✅ لازم يكون في الآخر عشان منتصادش مع الـ Routes التانية
+router.get('/:id', async (req, res) => {
+  try {
+    // ✅ استخدام getCompanyId من الـ Helper
+    const companyId = getCompanyId(req);
+    
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'companyId مطلوب في الـ Body أو الـ Header (x-company-id) أو من الـ Auth'
+      });
+    }
+
+    if (!isValidCompanyId(companyId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
+        received: companyId
+      });
+    }
+
+    const machine = await Machine.findOne({
+      _id: req.params.id,
+      companyId,
+      deletedAt: null
+    });
+
+    if (!machine) {
+      return res.status(404).json({
+        success: false,
+        message: 'Machine not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Machine retrieved successfully',
+      data: machine
+    });
+  } catch (error) {
+    logger.error('❌ GET /machines/:id error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching machine',
       error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
@@ -333,214 +560,6 @@ router.post('/', async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Error creating machine',
-      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
-    });
-  }
-});
-
-// ===== GET - آلة بالمعرف =====
-router.get('/:id', async (req, res) => {
-  try {
-    // ✅ استخدام getCompanyId من الـ Helper
-    const companyId = getCompanyId(req);
-    
-    if (!companyId) {
-      return res.status(400).json({
-        success: false,
-        message: 'companyId مطلوب في الـ Body أو الـ Header (x-company-id) أو من الـ Auth'
-      });
-    }
-
-    if (!isValidCompanyId(companyId)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
-        received: companyId
-      });
-    }
-
-    const machine = await Machine.findOne({
-      _id: req.params.id,
-      companyId,
-      deletedAt: null
-    });
-
-    if (!machine) {
-      return res.status(404).json({
-        success: false,
-        message: 'Machine not found'
-      });
-    }
-
-    res.json({
-      success: true,
-      message: 'Machine retrieved successfully',
-      data: machine
-    });
-  } catch (error) {
-    logger.error('❌ GET /machines/:id error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error fetching machine',
-      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
-    });
-  }
-});
-
-// ===== GET - آلة بالكود =====
-router.get('/code/:code', async (req, res) => {
-  try {
-    // ✅ استخدام getCompanyId من الـ Helper
-    const companyId = getCompanyId(req);
-    
-    if (!companyId) {
-      return res.status(400).json({
-        success: false,
-        message: 'companyId مطلوب في الـ Body أو الـ Header (x-company-id) أو من الـ Auth'
-      });
-    }
-
-    if (!isValidCompanyId(companyId)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
-        received: companyId
-      });
-    }
-
-    const code = req.params.code.toUpperCase();
-    const machine = await Machine.findOne({
-      code,
-      companyId,
-      deletedAt: null
-    });
-
-    if (!machine) {
-      return res.status(404).json({
-        success: false,
-        message: 'Machine not found'
-      });
-    }
-
-    res.json({
-      success: true,
-      message: 'Machine retrieved successfully',
-      data: machine
-    });
-  } catch (error) {
-    logger.error('❌ GET /machines/code/:code error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error fetching machine by code',
-      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
-    });
-  }
-});
-
-// ===== GET - آلات حسب الحالة التشغيلية =====
-router.get('/operational/:status', async (req, res) => {
-  try {
-    // ✅ استخدام getCompanyId من الـ Helper
-    const companyId = getCompanyId(req);
-    
-    if (!companyId) {
-      return res.status(400).json({
-        success: false,
-        message: 'companyId مطلوب في الـ Body أو الـ Header (x-company-id) أو من الـ Auth'
-      });
-    }
-
-    if (!isValidCompanyId(companyId)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
-        received: companyId
-      });
-    }
-
-    const validStatuses = ['online', 'offline', 'idle', 'maintenance', 'error'];
-    if (!validStatuses.includes(req.params.status)) {
-      return res.status(400).json({
-        success: false,
-        message: `Invalid operational status. Must be one of: ${validStatuses.join(', ')}`
-      });
-    }
-
-    const machines = await Machine.find({
-      operationalStatus: req.params.status,
-      companyId,
-      deletedAt: null
-    }).select('-__v');
-
-    res.json({
-      success: true,
-      message: 'Machines by operational status retrieved successfully',
-      data: machines,
-      count: machines.length
-    });
-  } catch (error) {
-    logger.error('❌ GET /machines/operational/:status error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error fetching machines by operational status',
-      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
-    });
-  }
-});
-
-// ===== GET - إحصائيات الآلات =====
-router.get('/stats', async (req, res) => {
-  try {
-    // ✅ استخدام getCompanyId من الـ Helper
-    const companyId = getCompanyId(req);
-    
-    if (!companyId) {
-      return res.status(400).json({
-        success: false,
-        message: 'companyId مطلوب في الـ Body أو الـ Header (x-company-id) أو من الـ Auth'
-      });
-    }
-
-    if (!isValidCompanyId(companyId)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
-        received: companyId
-      });
-    }
-
-    const [total, active, inactive, online, offline, idle, maintenance, error] = await Promise.all([
-      Machine.countDocuments({ companyId, deletedAt: null }),
-      Machine.countDocuments({ companyId, status: 'active', deletedAt: null }),
-      Machine.countDocuments({ companyId, status: 'inactive', deletedAt: null }),
-      Machine.countDocuments({ companyId, operationalStatus: 'online', deletedAt: null }),
-      Machine.countDocuments({ companyId, operationalStatus: 'offline', deletedAt: null }),
-      Machine.countDocuments({ companyId, operationalStatus: 'idle', deletedAt: null }),
-      Machine.countDocuments({ companyId, operationalStatus: 'maintenance', deletedAt: null }),
-      Machine.countDocuments({ companyId, operationalStatus: 'error', deletedAt: null })
-    ]);
-
-    res.json({
-      success: true,
-      message: 'Machine statistics retrieved successfully',
-      data: {
-        total,
-        active,
-        inactive,
-        operational: {
-          online,
-          offline,
-          idle,
-          maintenance,
-          error
-        }
-      }
-    });
-  } catch (error) {
-    logger.error('❌ GET /machines/stats error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error fetching machine statistics',
       error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }

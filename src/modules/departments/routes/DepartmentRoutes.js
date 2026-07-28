@@ -13,6 +13,288 @@ router.use(authMiddleware);
 router.use(tenantMiddleware(true));
 
 // ============================================================
+// GET - إحصائيات الأقسام
+// ✅ لازم يكون قبل /:id عشان منتصادش معاه
+// ============================================================
+router.get('/stats', async (req, res) => {
+  try {
+    // ✅ استخدام getCompanyId من الـ Helper
+    const companyId = getCompanyId(req);
+    
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'companyId مطلوب في الـ Body أو الـ Header (x-company-id) أو من الـ Auth'
+      });
+    }
+
+    if (!isValidCompanyId(companyId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
+        received: companyId
+      });
+    }
+
+    const factoryId = req.query.factoryId || null;
+    const stats = await Department.getStats(factoryId, companyId);
+    const typeDistribution = await Department.getTypeDistribution(factoryId, companyId);
+
+    res.json({
+      success: true,
+      message: 'Department statistics retrieved successfully',
+      data: {
+        stats,
+        typeDistribution,
+        factoryId: factoryId || 'all'
+      }
+    });
+  } catch (error) {
+    logger.error('❌ GET /departments/stats error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching department statistics',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
+  }
+});
+
+// ============================================================
+// GET - الأقسام النشطة
+// ✅ لازم يكون قبل /:id عشان منتصادش معاه
+// ============================================================
+router.get('/active', async (req, res) => {
+  try {
+    // ✅ استخدام getCompanyId من الـ Helper
+    const companyId = getCompanyId(req);
+    
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'companyId مطلوب في الـ Body أو الـ Header (x-company-id) أو من الـ Auth'
+      });
+    }
+
+    if (!isValidCompanyId(companyId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
+        received: companyId
+      });
+    }
+
+    const factoryId = req.query.factoryId || null;
+    const departments = await Department.findActive(factoryId, companyId);
+
+    res.json({
+      success: true,
+      message: 'Active departments retrieved successfully',
+      data: departments,
+      count: departments.length
+    });
+  } catch (error) {
+    logger.error('❌ GET /departments/active error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching departments',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
+  }
+});
+
+// ============================================================
+// GET - الأقسام حسب المصنع
+// ✅ لازم يكون قبل /:id عشان منتصادش معاه
+// ============================================================
+router.get('/factory/:factoryId', async (req, res) => {
+  try {
+    // ✅ استخدام getCompanyId من الـ Helper
+    const companyId = getCompanyId(req);
+    
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'companyId مطلوب في الـ Body أو الـ Header (x-company-id) أو من الـ Auth'
+      });
+    }
+
+    if (!isValidCompanyId(companyId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
+        received: companyId
+      });
+    }
+
+    const departments = await Department.findByFactory(
+      req.params.factoryId,
+      companyId
+    );
+
+    res.json({
+      success: true,
+      message: 'Departments retrieved successfully',
+      data: departments,
+      count: departments.length
+    });
+  } catch (error) {
+    logger.error('❌ GET /departments/factory/:factoryId error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching departments',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
+  }
+});
+
+// ============================================================
+// GET - الأقسام حسب النوع
+// ✅ لازم يكون قبل /:id عشان منتصادش معاه
+// ============================================================
+router.get('/type/:type', async (req, res) => {
+  try {
+    // ✅ استخدام getCompanyId من الـ Helper
+    const companyId = getCompanyId(req);
+    
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'companyId مطلوب في الـ Body أو الـ Header (x-company-id) أو من الـ Auth'
+      });
+    }
+
+    if (!isValidCompanyId(companyId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
+        received: companyId
+      });
+    }
+
+    const factoryId = req.query.factoryId || null;
+    const departments = await Department.findByType(
+      req.params.type,
+      factoryId,
+      companyId
+    );
+
+    res.json({
+      success: true,
+      message: 'Departments retrieved successfully',
+      data: departments,
+      count: departments.length
+    });
+  } catch (error) {
+    logger.error('❌ GET /departments/type/:type error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching departments',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
+  }
+});
+
+// ============================================================
+// GET - البحث في الأقسام
+// ✅ لازم يكون قبل /:id عشان منتصادش معاه
+// ============================================================
+router.get('/search/:term', async (req, res) => {
+  try {
+    // ✅ استخدام getCompanyId من الـ Helper
+    const companyId = getCompanyId(req);
+    
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'companyId مطلوب في الـ Body أو الـ Header (x-company-id) أو من الـ Auth'
+      });
+    }
+
+    if (!isValidCompanyId(companyId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
+        received: companyId
+      });
+    }
+
+    const factoryId = req.query.factoryId || null;
+    const departments = await Department.search(
+      req.params.term,
+      factoryId,
+      companyId
+    );
+
+    res.json({
+      success: true,
+      message: 'Search results retrieved successfully',
+      data: departments,
+      count: departments.length
+    });
+  } catch (error) {
+    logger.error('❌ GET /departments/search/:term error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error searching departments',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
+  }
+});
+
+// ============================================================
+// GET - قسم بالكود
+// ✅ لازم يكون قبل /:id عشان منتصادش معاه
+// ============================================================
+router.get('/code/:code', async (req, res) => {
+  try {
+    // ✅ استخدام getCompanyId من الـ Helper
+    const companyId = getCompanyId(req);
+    
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'companyId مطلوب في الـ Body أو الـ Header (x-company-id) أو من الـ Auth'
+      });
+    }
+
+    if (!isValidCompanyId(companyId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
+        received: companyId
+      });
+    }
+
+    const code = req.params.code.toUpperCase();
+    const department = await Department.findOne({
+      code,
+      companyId,
+      deletedAt: null
+    });
+
+    if (!department) {
+      return res.status(404).json({
+        success: false,
+        message: 'Department not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Department retrieved successfully',
+      data: department
+    });
+  } catch (error) {
+    logger.error('❌ GET /departments/code/:code error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching department by code',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
+  }
+});
+
+// ============================================================
 // GET - قائمة الأقسام (مع Pagination و Filtering)
 // ============================================================
 router.get('/', async (req, res) => {
@@ -101,185 +383,8 @@ router.get('/', async (req, res) => {
 });
 
 // ============================================================
-// GET - إحصائيات الأقسام
-// ============================================================
-router.get('/stats', async (req, res) => {
-  try {
-    // ✅ استخدام getCompanyId من الـ Helper
-    const companyId = getCompanyId(req);
-    
-    if (!companyId) {
-      return res.status(400).json({
-        success: false,
-        message: 'companyId مطلوب في الـ Body أو الـ Header (x-company-id) أو من الـ Auth'
-      });
-    }
-
-    if (!isValidCompanyId(companyId)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
-        received: companyId
-      });
-    }
-
-    const factoryId = req.query.factoryId || null;
-    const stats = await Department.getStats(factoryId, companyId);
-    const typeDistribution = await Department.getTypeDistribution(factoryId, companyId);
-
-    res.json({
-      success: true,
-      message: 'Department statistics retrieved successfully',
-      data: {
-        stats,
-        typeDistribution,
-        factoryId: factoryId || 'all'
-      }
-    });
-  } catch (error) {
-    logger.error('❌ GET /departments/stats error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error fetching department statistics',
-      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
-    });
-  }
-});
-
-// ============================================================
-// GET - الأقسام حسب المصنع
-// ============================================================
-router.get('/factory/:factoryId', async (req, res) => {
-  try {
-    // ✅ استخدام getCompanyId من الـ Helper
-    const companyId = getCompanyId(req);
-    
-    if (!companyId) {
-      return res.status(400).json({
-        success: false,
-        message: 'companyId مطلوب في الـ Body أو الـ Header (x-company-id) أو من الـ Auth'
-      });
-    }
-
-    if (!isValidCompanyId(companyId)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
-        received: companyId
-      });
-    }
-
-    const departments = await Department.findByFactory(
-      req.params.factoryId,
-      companyId
-    );
-
-    res.json({
-      success: true,
-      message: 'Departments retrieved successfully',
-      data: departments,
-      count: departments.length
-    });
-  } catch (error) {
-    logger.error('❌ GET /departments/factory/:factoryId error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error fetching departments',
-      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
-    });
-  }
-});
-
-// ============================================================
-// GET - الأقسام حسب النوع
-// ============================================================
-router.get('/type/:type', async (req, res) => {
-  try {
-    // ✅ استخدام getCompanyId من الـ Helper
-    const companyId = getCompanyId(req);
-    
-    if (!companyId) {
-      return res.status(400).json({
-        success: false,
-        message: 'companyId مطلوب في الـ Body أو الـ Header (x-company-id) أو من الـ Auth'
-      });
-    }
-
-    if (!isValidCompanyId(companyId)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
-        received: companyId
-      });
-    }
-
-    const factoryId = req.query.factoryId || null;
-    const departments = await Department.findByType(
-      req.params.type,
-      factoryId,
-      companyId
-    );
-
-    res.json({
-      success: true,
-      message: 'Departments retrieved successfully',
-      data: departments,
-      count: departments.length
-    });
-  } catch (error) {
-    logger.error('❌ GET /departments/type/:type error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error fetching departments',
-      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
-    });
-  }
-});
-
-// ============================================================
-// GET - الأقسام النشطة
-// ============================================================
-router.get('/active', async (req, res) => {
-  try {
-    // ✅ استخدام getCompanyId من الـ Helper
-    const companyId = getCompanyId(req);
-    
-    if (!companyId) {
-      return res.status(400).json({
-        success: false,
-        message: 'companyId مطلوب في الـ Body أو الـ Header (x-company-id) أو من الـ Auth'
-      });
-    }
-
-    if (!isValidCompanyId(companyId)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
-        received: companyId
-      });
-    }
-
-    const factoryId = req.query.factoryId || null;
-    const departments = await Department.findActive(factoryId, companyId);
-
-    res.json({
-      success: true,
-      message: 'Active departments retrieved successfully',
-      data: departments,
-      count: departments.length
-    });
-  } catch (error) {
-    logger.error('❌ GET /departments/active error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error fetching departments',
-      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
-    });
-  }
-});
-
-// ============================================================
 // GET - قسم بالمعرف
+// ✅ لازم يكون في الآخر عشان منتصادش مع الـ Routes التانية
 // ============================================================
 router.get('/:id', async (req, res) => {
   try {
@@ -330,104 +435,6 @@ router.get('/:id', async (req, res) => {
 });
 
 // ============================================================
-// GET - البحث في الأقسام
-// ============================================================
-router.get('/search/:term', async (req, res) => {
-  try {
-    // ✅ استخدام getCompanyId من الـ Helper
-    const companyId = getCompanyId(req);
-    
-    if (!companyId) {
-      return res.status(400).json({
-        success: false,
-        message: 'companyId مطلوب في الـ Body أو الـ Header (x-company-id) أو من الـ Auth'
-      });
-    }
-
-    if (!isValidCompanyId(companyId)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
-        received: companyId
-      });
-    }
-
-    const factoryId = req.query.factoryId || null;
-    const departments = await Department.search(
-      req.params.term,
-      factoryId,
-      companyId
-    );
-
-    res.json({
-      success: true,
-      message: 'Search results retrieved successfully',
-      data: departments,
-      count: departments.length
-    });
-  } catch (error) {
-    logger.error('❌ GET /departments/search/:term error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error searching departments',
-      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
-    });
-  }
-});
-
-// ============================================================
-// GET - قسم بالكود
-// ============================================================
-router.get('/code/:code', async (req, res) => {
-  try {
-    // ✅ استخدام getCompanyId من الـ Helper
-    const companyId = getCompanyId(req);
-    
-    if (!companyId) {
-      return res.status(400).json({
-        success: false,
-        message: 'companyId مطلوب في الـ Body أو الـ Header (x-company-id) أو من الـ Auth'
-      });
-    }
-
-    if (!isValidCompanyId(companyId)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
-        received: companyId
-      });
-    }
-
-    const code = req.params.code.toUpperCase();
-    const department = await Department.findOne({
-      code,
-      companyId,
-      deletedAt: null
-    });
-
-    if (!department) {
-      return res.status(404).json({
-        success: false,
-        message: 'Department not found'
-      });
-    }
-
-    res.json({
-      success: true,
-      message: 'Department retrieved successfully',
-      data: department
-    });
-  } catch (error) {
-    logger.error('❌ GET /departments/code/:code error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error fetching department by code',
-      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
-    });
-  }
-});
-
-// ============================================================
 // POST - إنشاء قسم جديد
 // ============================================================
 router.post('/', async (req, res) => {
@@ -457,6 +464,14 @@ router.post('/', async (req, res) => {
       return res.status(400).json({
         success: false,
         message: 'Name, code, and factoryId are required'
+      });
+    }
+
+    // ✅ التحقق من صحة الكود (حروف كبيرة وأرقام فقط)
+    if (!/^[A-Z0-9]+$/.test(code.toUpperCase())) {
+      return res.status(400).json({
+        success: false,
+        message: 'Code must contain only uppercase letters and numbers'
       });
     }
 

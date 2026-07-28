@@ -10,8 +10,9 @@ const logger = require('../../../core/utils/logger');
 router.use(authMiddleware);
 router.use(tenantMiddleware(true));
 
-// ===== GET - قائمة التقارير =====
-router.get('/', async (req, res) => {
+// ===== GET - إحصائيات التقارير =====
+// ✅ لازم يكون قبل /:id عشان منتصادش معاه
+router.get('/stats', async (req, res) => {
   try {
     // ✅ استخدام getCompanyId من الـ Helper
     const companyId = getCompanyId(req);
@@ -31,50 +32,49 @@ router.get('/', async (req, res) => {
       });
     }
 
-    const { type, status, limit = 50, page = 1, sortBy = 'createdAt', sortOrder = 'desc' } = req.query;
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const stats = await Report.getStats(companyId);
+    const typeDistribution = await Report.getTypeDistribution(companyId);
+    const statusDistribution = await Report.getStatusDistribution(companyId);
 
-    const query = { companyId, deletedAt: null };
-    if (type) query.type = type;
-    if (status) query.status = status;
+    // ✅ إحصائيات إضافية
+    const scheduledReports = await Report.countDocuments({
+      companyId,
+      deletedAt: null,
+      'scheduling.enabled': true
+    });
 
-    const sort = { [sortBy]: sortOrder === 'desc' ? -1 : 1 };
-
-    const [reports, total] = await Promise.all([
-      Report.find(query)
-        .sort(sort)
-        .skip(skip)
-        .limit(parseInt(limit))
-        .select('-__v'),
-      Report.countDocuments(query)
-    ]);
+    const recentReports = await Report.find({
+      companyId,
+      deletedAt: null
+    })
+    .sort({ createdAt: -1 })
+    .limit(5)
+    .select('name code type status createdAt');
 
     res.json({
       success: true,
-      message: 'Reports retrieved successfully',
-      data: reports,
-      count: reports.length,
-      meta: {
-        page: parseInt(page),
-        limit: parseInt(limit),
-        total,
-        totalPages: Math.ceil(total / parseInt(limit)),
-        hasNext: skip + reports.length < total,
-        hasPrev: parseInt(page) > 1
+      message: 'Report statistics retrieved successfully',
+      data: {
+        stats,
+        typeDistribution,
+        statusDistribution,
+        scheduledReports,
+        recentReports
       }
     });
   } catch (error) {
-    logger.error('❌ Error fetching reports:', error);
+    logger.error('❌ Error fetching report stats:', error);
     res.status(500).json({
       success: false,
-      message: 'Error fetching reports',
+      message: 'Error fetching report statistics',
       error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
 });
 
-// ===== GET - تقرير بالمعرف =====
-router.get('/:id', async (req, res) => {
+// ===== GET - تقارير حسب المصنع =====
+// ✅ لازم يكون قبل /:id عشان منتصادش معاه
+router.get('/factory/:factoryId', async (req, res) => {
   try {
     // ✅ استخدام getCompanyId من الـ Helper
     const companyId = getCompanyId(req);
@@ -94,36 +94,84 @@ router.get('/:id', async (req, res) => {
       });
     }
 
-    const { id } = req.params;
-    const report = await Report.findOne({
-      _id: id,
+    const reports = await Report.find({
+      factoryId: req.params.factoryId,
       companyId,
       deletedAt: null
-    });
-
-    if (!report) {
-      return res.status(404).json({
-        success: false,
-        message: 'Report not found'
-      });
-    }
+    }).sort({ createdAt: -1 }).select('-__v');
 
     res.json({
       success: true,
-      message: 'Report retrieved successfully',
-      data: report
+      message: 'Reports by factory retrieved successfully',
+      data: reports,
+      count: reports.length
     });
   } catch (error) {
-    logger.error('❌ Error fetching report:', error);
+    logger.error('❌ Error fetching reports by factory:', error);
     res.status(500).json({
       success: false,
-      message: 'Error fetching report',
+      message: 'Error fetching reports by factory',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
+  }
+});
+
+// ===== GET - تقارير حسب الفترة =====
+// ✅ لازم يكون قبل /:id عشان منتصادش معاه
+router.get('/period', async (req, res) => {
+  try {
+    // ✅ استخدام getCompanyId من الـ Helper
+    const companyId = getCompanyId(req);
+
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'companyId مطلوب في الـ Body أو الـ Header (x-company-id) أو من الـ Auth'
+      });
+    }
+
+    if (!isValidCompanyId(companyId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
+        received: companyId
+      });
+    }
+
+    const { startDate, endDate } = req.query;
+
+    if (!startDate || !endDate) {
+      return res.status(400).json({
+        success: false,
+        message: 'startDate and endDate are required'
+      });
+    }
+
+    const reports = await Report.find({
+      companyId,
+      'period.startDate': { $gte: new Date(startDate) },
+      'period.endDate': { $lte: new Date(endDate) },
+      deletedAt: null
+    }).sort({ createdAt: -1 }).select('-__v');
+
+    res.json({
+      success: true,
+      message: 'Reports by period retrieved successfully',
+      data: reports,
+      count: reports.length
+    });
+  } catch (error) {
+    logger.error('❌ Error fetching reports by period:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching reports by period',
       error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
 });
 
 // ===== GET - تقرير بالكود =====
+// ✅ لازم يكون قبل /:id عشان منتصادش معاه
 router.get('/code/:code', async (req, res) => {
   try {
     // ✅ استخدام getCompanyId من الـ Helper
@@ -173,8 +221,8 @@ router.get('/code/:code', async (req, res) => {
   }
 });
 
-// ===== GET - تقارير حسب المصنع =====
-router.get('/factory/:factoryId', async (req, res) => {
+// ===== GET - قائمة التقارير =====
+router.get('/', async (req, res) => {
   try {
     // ✅ استخدام getCompanyId من الـ Helper
     const companyId = getCompanyId(req);
@@ -194,30 +242,70 @@ router.get('/factory/:factoryId', async (req, res) => {
       });
     }
 
-    const reports = await Report.find({
-      factoryId: req.params.factoryId,
-      companyId,
-      deletedAt: null
-    }).sort({ createdAt: -1 }).select('-__v');
+    const { 
+      type, 
+      status, 
+      format,
+      factoryId,
+      search,
+      limit = 50, 
+      page = 1, 
+      sortBy = 'createdAt', 
+      sortOrder = 'desc' 
+    } = req.query;
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    const query = { companyId, deletedAt: null };
+    if (type) query.type = type;
+    if (status) query.status = status;
+    if (format) query.format = format;
+    if (factoryId) query.factoryId = factoryId;
+    if (search) {
+      query.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { code: { $regex: search, $options: 'i' } },
+        { description: { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    const sort = { [sortBy]: sortOrder === 'desc' ? -1 : 1 };
+
+    const [reports, total] = await Promise.all([
+      Report.find(query)
+        .sort(sort)
+        .skip(skip)
+        .limit(parseInt(limit))
+        .select('-__v'),
+      Report.countDocuments(query)
+    ]);
 
     res.json({
       success: true,
-      message: 'Reports by factory retrieved successfully',
+      message: 'Reports retrieved successfully',
       data: reports,
-      count: reports.length
+      count: reports.length,
+      meta: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        totalPages: Math.ceil(total / parseInt(limit)),
+        hasNext: skip + reports.length < total,
+        hasPrev: parseInt(page) > 1
+      }
     });
   } catch (error) {
-    logger.error('❌ Error fetching reports by factory:', error);
+    logger.error('❌ Error fetching reports:', error);
     res.status(500).json({
       success: false,
-      message: 'Error fetching reports by factory',
+      message: 'Error fetching reports',
       error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
 });
 
-// ===== GET - تقارير حسب الفترة =====
-router.get('/period', async (req, res) => {
+// ===== GET - تقرير بالمعرف =====
+// ✅ لازم يكون في الآخر عشان منتصادش مع الـ Routes التانية
+router.get('/:id', async (req, res) => {
   try {
     // ✅ استخدام getCompanyId من الـ Helper
     const companyId = getCompanyId(req);
@@ -237,33 +325,30 @@ router.get('/period', async (req, res) => {
       });
     }
 
-    const { startDate, endDate } = req.query;
+    const { id } = req.params;
+    const report = await Report.findOne({
+      _id: id,
+      companyId,
+      deletedAt: null
+    });
 
-    if (!startDate || !endDate) {
-      return res.status(400).json({
+    if (!report) {
+      return res.status(404).json({
         success: false,
-        message: 'startDate and endDate are required'
+        message: 'Report not found'
       });
     }
 
-    const reports = await Report.find({
-      companyId,
-      'period.startDate': { $gte: new Date(startDate) },
-      'period.endDate': { $lte: new Date(endDate) },
-      deletedAt: null
-    }).sort({ createdAt: -1 }).select('-__v');
-
     res.json({
       success: true,
-      message: 'Reports by period retrieved successfully',
-      data: reports,
-      count: reports.length
+      message: 'Report retrieved successfully',
+      data: report
     });
   } catch (error) {
-    logger.error('❌ Error fetching reports by period:', error);
+    logger.error('❌ Error fetching report:', error);
     res.status(500).json({
       success: false,
-      message: 'Error fetching reports by period',
+      message: 'Error fetching report',
       error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
@@ -321,6 +406,14 @@ router.post('/', async (req, res) => {
       return res.status(400).json({
         success: false,
         message: 'Code must contain only uppercase letters and numbers'
+      });
+    }
+
+    // ✅ التحقق من صحة الفترة
+    if (new Date(period.startDate) > new Date(period.endDate)) {
+      return res.status(400).json({
+        success: false,
+        message: 'startDate must be before endDate'
       });
     }
 
@@ -454,6 +547,13 @@ router.post('/:id/generate', async (req, res) => {
       });
     }
 
+    if (report.status === 'completed') {
+      return res.status(409).json({
+        success: false,
+        message: 'Report is already completed'
+      });
+    }
+
     // بدء التوليد
     await report.startGeneration();
 
@@ -571,6 +671,80 @@ router.put('/:id', async (req, res) => {
     });
   } catch (error) {
     logger.error('❌ Error updating report:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error updating report',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
+  }
+});
+
+// ===== PATCH - تحديث جزئي لتقرير =====
+router.patch('/:id', async (req, res) => {
+  try {
+    // ✅ استخدام getCompanyId من الـ Helper
+    const companyId = getCompanyId(req);
+    const userId = req.user?.id;
+
+    if (!companyId || !userId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Unauthorized: user/company context missing from request'
+      });
+    }
+
+    if (!isValidCompanyId(companyId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
+        received: companyId
+      });
+    }
+
+    const updates = req.body;
+    delete updates._id;
+    delete updates.__v;
+    delete updates.createdAt;
+    delete updates.createdBy;
+    delete updates.companyId;
+    delete updates.code;
+    delete updates.factoryId;
+
+    const report = await Report.findOne({
+      _id: req.params.id,
+      companyId,
+      deletedAt: null
+    });
+
+    if (!report) {
+      return res.status(404).json({
+        success: false,
+        message: 'Report not found'
+      });
+    }
+
+    Object.keys(updates).forEach(key => {
+      if (key === 'name') updates[key] = updates[key].trim();
+      if (key === 'description') updates[key] = updates[key] || null;
+      if (key === 'period' && updates[key].startDate) {
+        updates[key].startDate = new Date(updates[key].startDate);
+        updates[key].endDate = new Date(updates[key].endDate);
+      }
+      report[key] = updates[key];
+    });
+
+    report.updatedBy = userId;
+    report.updatedAt = new Date();
+
+    const updatedReport = await report.save();
+
+    res.json({
+      success: true,
+      message: 'Report updated successfully',
+      data: updatedReport
+    });
+  } catch (error) {
+    logger.error('❌ PATCH /reports/:id error:', error);
     res.status(500).json({
       success: false,
       message: 'Error updating report',
@@ -776,50 +950,6 @@ router.put('/:id/status', async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Error updating report status',
-      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
-    });
-  }
-});
-
-// ===== GET - إحصائيات التقارير =====
-router.get('/stats', async (req, res) => {
-  try {
-    // ✅ استخدام getCompanyId من الـ Helper
-    const companyId = getCompanyId(req);
-
-    if (!companyId) {
-      return res.status(400).json({
-        success: false,
-        message: 'companyId مطلوب في الـ Body أو الـ Header (x-company-id) أو من الـ Auth'
-      });
-    }
-
-    if (!isValidCompanyId(companyId)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
-        received: companyId
-      });
-    }
-
-    const stats = await Report.getStats(companyId);
-    const typeDistribution = await Report.getTypeDistribution(companyId);
-    const statusDistribution = await Report.getStatusDistribution(companyId);
-
-    res.json({
-      success: true,
-      message: 'Report statistics retrieved successfully',
-      data: {
-        stats,
-        typeDistribution,
-        statusDistribution
-      }
-    });
-  } catch (error) {
-    logger.error('❌ Error fetching report stats:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error fetching report statistics',
       error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
