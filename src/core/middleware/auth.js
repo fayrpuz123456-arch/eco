@@ -11,14 +11,26 @@ const User = require('../../modules/users/models/User.model');
  */
 const authMiddleware = async (req, res, next) => {
   try {
+    // ✅ DEBUG: طباعة كل الـ Headers (للتشخيص)
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('📋 ALL HEADERS:', JSON.stringify(req.headers, null, 2));
+    }
+
     // 1. التحقق من وجود التوكن في الـ Header
     const authHeader = req.headers.authorization;
+    
+    // ✅ DEBUG: طباعة الـ Authorization Header
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('🔑 Authorization Header:', authHeader);
+      console.log('🔑 Authorization Header Length:', authHeader?.length || 0);
+    }
     
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       logger.warn('Authentication failed: No token provided', {
         ip: req.ip,
         path: req.path,
-        method: req.method
+        method: req.method,
+        headers: req.headers
       });
       return sendUnauthorized(res, 'Authentication required. Please provide a valid token.');
     }
@@ -26,10 +38,18 @@ const authMiddleware = async (req, res, next) => {
     // 2. استخراج التوكن
     const token = authHeader.split('Bearer ')[1];
     
+    // ✅ DEBUG: طباعة الـ Token
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('🔑 Token:', token);
+      console.log('🔑 Token Length:', token?.length || 0);
+      console.log('🔑 Token First 20 chars:', token?.substring(0, 20) || 'empty');
+    }
+    
     if (!token || token.length < 10) {
       logger.warn('Authentication failed: Invalid token format', {
         ip: req.ip,
-        path: req.path
+        path: req.path,
+        tokenLength: token?.length || 0
       });
       return sendUnauthorized(res, 'Invalid token format.');
     }
@@ -75,7 +95,6 @@ const authMiddleware = async (req, res, next) => {
           });
         } catch (createError) {
           logger.error('❌ Failed to auto-create user:', createError.message);
-          // ✅ لو فشل الإنشاء، نرمي error بدل ما نكمل ببيانات ناقصة
           return sendError(res, 500, 'Failed to create user profile. Please contact support.');
         }
       }
@@ -122,12 +141,11 @@ const authMiddleware = async (req, res, next) => {
         mongoData: userFromDB || null
       };
 
-      // 6. استخراج companyId (بدون fallback ثابت)
+      // 6. استخراج companyId
       const companyId = req.headers['x-company-id'] || 
                         decodedToken.claims?.companyId || 
                         userFromDB?.companyId;
 
-      // ✅ لو مفيش companyId، نرمي error بدل ما نستخدم ثابت
       if (!companyId) {
         logger.error('❌ Company ID not found for user:', {
           uid: firebaseUser.uid,
@@ -233,7 +251,6 @@ const optionalAuthMiddleware = async (req, res, next) => {
           mongoData: userFromDB || null
         };
         
-        // ✅ بدون fallback ثابت
         const companyId = req.headers['x-company-id'] || 
                           decodedToken.claims?.companyId || 
                           userFromDB?.companyId;
