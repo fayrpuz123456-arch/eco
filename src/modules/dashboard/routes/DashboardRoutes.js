@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const DashboardController = require('../controllers/DashboardController');
+const Dashboard = require('../models/Dashboard.model');
 const { authMiddleware } = require('../../../core/middleware/auth');
 const { tenantMiddleware } = require('../../../core/middleware/tenant');
 const { checkPermissions, PERMISSIONS } = require('../../../core/middleware/permissions');
@@ -17,7 +18,6 @@ router.use(tenantMiddleware(true));
 // ✅ لازم يكون قبل /:id عشان منتصادش معاه
 router.get('/stats', checkPermissions([PERMISSIONS.DASHBOARD_VIEW]), async (req, res) => {
   try {
-    // ✅ استخدام getCompanyId من الـ Helper
     const companyId = getCompanyId(req);
     const userId = req.user?.id;
 
@@ -36,7 +36,6 @@ router.get('/stats', checkPermissions([PERMISSIONS.DASHBOARD_VIEW]), async (req,
       });
     }
 
-    // إضافة companyId إلى req.query للـ Controller
     req.query.companyId = companyId;
     req.query.userId = userId;
 
@@ -55,7 +54,6 @@ router.get('/stats', checkPermissions([PERMISSIONS.DASHBOARD_VIEW]), async (req,
 // ✅ لازم يكون قبل /:id عشان منتصادش معاه
 router.get('/default', checkPermissions([PERMISSIONS.DASHBOARD_VIEW]), async (req, res) => {
   try {
-    // ✅ استخدام getCompanyId من الـ Helper
     const companyId = getCompanyId(req);
     const userId = req.user?.id;
 
@@ -74,7 +72,6 @@ router.get('/default', checkPermissions([PERMISSIONS.DASHBOARD_VIEW]), async (re
       });
     }
 
-    // إضافة companyId إلى req.query للـ Controller
     req.query.companyId = companyId;
     req.query.userId = userId;
 
@@ -92,7 +89,6 @@ router.get('/default', checkPermissions([PERMISSIONS.DASHBOARD_VIEW]), async (re
 // ===== GET - قائمة لوحات التحكم =====
 router.get('/', checkPermissions([PERMISSIONS.DASHBOARD_VIEW]), async (req, res) => {
   try {
-    // ✅ استخدام getCompanyId من الـ Helper
     const companyId = getCompanyId(req);
     const userId = req.user?.id;
 
@@ -111,7 +107,6 @@ router.get('/', checkPermissions([PERMISSIONS.DASHBOARD_VIEW]), async (req, res)
       });
     }
 
-    // إضافة companyId إلى req.query للـ Controller
     req.query.companyId = companyId;
     req.query.userId = userId;
 
@@ -130,7 +125,6 @@ router.get('/', checkPermissions([PERMISSIONS.DASHBOARD_VIEW]), async (req, res)
 // ✅ لازم يكون في الآخر عشان منتصادش مع الـ Routes التانية
 router.get('/:id', checkPermissions([PERMISSIONS.DASHBOARD_VIEW]), async (req, res) => {
   try {
-    // ✅ استخدام getCompanyId من الـ Helper
     const companyId = getCompanyId(req);
     const userId = req.user?.id;
 
@@ -149,7 +143,6 @@ router.get('/:id', checkPermissions([PERMISSIONS.DASHBOARD_VIEW]), async (req, r
       });
     }
 
-    // إضافة companyId إلى req.query للـ Controller
     req.query.companyId = companyId;
     req.query.userId = userId;
 
@@ -167,7 +160,6 @@ router.get('/:id', checkPermissions([PERMISSIONS.DASHBOARD_VIEW]), async (req, r
 // ===== POST - إنشاء لوحة تحكم جديدة =====
 router.post('/', checkPermissions([PERMISSIONS.DASHBOARD_CREATE]), async (req, res) => {
   try {
-    // ✅ استخدام getCompanyId من الـ Helper
     const companyId = getCompanyId(req);
     const userId = req.user?.id;
 
@@ -186,7 +178,6 @@ router.post('/', checkPermissions([PERMISSIONS.DASHBOARD_CREATE]), async (req, r
       });
     }
 
-    // ✅ التأكد من أن companyId في الـ Body مطابق للـ companyId من الـ Auth
     if (req.body.companyId && req.body.companyId !== companyId) {
       return res.status(403).json({
         success: false,
@@ -195,7 +186,6 @@ router.post('/', checkPermissions([PERMISSIONS.DASHBOARD_CREATE]), async (req, r
     }
 
     // ✅ التحقق من عدم وجود لوحة تحكم بنفس الاسم للمستخدم
-    const { default: Dashboard } = require('../models/Dashboard.model');
     const existingDashboard = await Dashboard.findOne({
       name: req.body.name,
       userId: userId,
@@ -210,7 +200,23 @@ router.post('/', checkPermissions([PERMISSIONS.DASHBOARD_CREATE]), async (req, r
       });
     }
 
-    // إضافة companyId إلى req.body للـ Controller
+    // ✅ التحقق من وجود لوحة تحكم افتراضية بالفعل لو isDefault: true
+    if (req.body.settings?.isDefault) {
+      const defaultDashboard = await Dashboard.findOne({
+        userId: userId,
+        companyId: companyId,
+        'settings.isDefault': true,
+        deletedAt: null
+      });
+
+      if (defaultDashboard) {
+        return res.status(409).json({
+          success: false,
+          message: 'A default dashboard already exists. Please set isDefault to false or unset the existing default first.'
+        });
+      }
+    }
+
     req.body.companyId = companyId;
     req.body.userId = userId;
 
@@ -228,7 +234,6 @@ router.post('/', checkPermissions([PERMISSIONS.DASHBOARD_CREATE]), async (req, r
 // ===== PUT - تحديث لوحة تحكم =====
 router.put('/:id', checkPermissions([PERMISSIONS.DASHBOARD_UPDATE]), async (req, res) => {
   try {
-    // ✅ استخدام getCompanyId من الـ Helper
     const companyId = getCompanyId(req);
     const userId = req.user?.id;
 
@@ -247,10 +252,44 @@ router.put('/:id', checkPermissions([PERMISSIONS.DASHBOARD_UPDATE]), async (req,
       });
     }
 
-    // منع تحديث companyId
-    delete req.body.companyId;
+    // ✅ التأكد من أن المستخدم لديه صلاحية التحديث
+    const dashboard = await Dashboard.findOne({
+      _id: req.params.id,
+      companyId: companyId,
+      userId: userId,
+      deletedAt: null
+    });
 
-    // إضافة companyId إلى req.query للـ Controller
+    if (!dashboard) {
+      return res.status(404).json({
+        success: false,
+        message: 'Dashboard not found'
+      });
+    }
+
+    // ✅ منع تحديث companyId
+    delete req.body.companyId;
+    delete req.body.userId;
+    delete req.body.createdBy;
+
+    // ✅ منع تحديث isDefault إذا كان هناك لوحة افتراضية أخرى
+    if (req.body.settings?.isDefault === true) {
+      const defaultDashboard = await Dashboard.findOne({
+        _id: { $ne: req.params.id },
+        userId: userId,
+        companyId: companyId,
+        'settings.isDefault': true,
+        deletedAt: null
+      });
+
+      if (defaultDashboard) {
+        return res.status(409).json({
+          success: false,
+          message: 'Another default dashboard already exists. Please set isDefault to false or unset the existing default first.'
+        });
+      }
+    }
+
     req.query.companyId = companyId;
     req.query.userId = userId;
 
@@ -268,7 +307,6 @@ router.put('/:id', checkPermissions([PERMISSIONS.DASHBOARD_UPDATE]), async (req,
 // ===== PUT - تعيين لوحة تحكم كافتراضية =====
 router.put('/:id/default', checkPermissions([PERMISSIONS.DASHBOARD_UPDATE]), async (req, res) => {
   try {
-    // ✅ استخدام getCompanyId من الـ Helper
     const companyId = getCompanyId(req);
     const userId = req.user?.id;
 
@@ -287,7 +325,6 @@ router.put('/:id/default', checkPermissions([PERMISSIONS.DASHBOARD_UPDATE]), asy
       });
     }
 
-    // ✅ التحقق من أن المستخدم لديه صلاحية تعيين لوحة التحكم كافتراضية
     const userRole = req.user?.role || 'viewer';
     if (userRole !== 'admin' && userRole !== 'manager') {
       return res.status(403).json({
@@ -296,7 +333,30 @@ router.put('/:id/default', checkPermissions([PERMISSIONS.DASHBOARD_UPDATE]), asy
       });
     }
 
-    // إضافة companyId إلى req.query للـ Controller
+    // ✅ إلغاء تعيين الافتراضية من جميع لوحات التحكم
+    await Dashboard.updateMany(
+      { userId: userId, companyId: companyId, deletedAt: null },
+      { 'settings.isDefault': false }
+    );
+
+    // ✅ تعيين الافتراضية للوحة المحددة
+    const dashboard = await Dashboard.findOneAndUpdate(
+      { _id: req.params.id, userId: userId, companyId: companyId, deletedAt: null },
+      { 
+        'settings.isDefault': true,
+        updatedBy: userId,
+        updatedAt: new Date()
+      },
+      { returnDocument: 'after' }
+    );
+
+    if (!dashboard) {
+      return res.status(404).json({
+        success: false,
+        message: 'Dashboard not found'
+      });
+    }
+
     req.query.companyId = companyId;
     req.query.userId = userId;
 
@@ -314,7 +374,6 @@ router.put('/:id/default', checkPermissions([PERMISSIONS.DASHBOARD_UPDATE]), asy
 // ===== POST - نسخ لوحة تحكم =====
 router.post('/:id/copy', checkPermissions([PERMISSIONS.DASHBOARD_CREATE]), async (req, res) => {
   try {
-    // ✅ استخدام getCompanyId من الـ Helper
     const companyId = getCompanyId(req);
     const userId = req.user?.id;
 
@@ -333,12 +392,6 @@ router.post('/:id/copy', checkPermissions([PERMISSIONS.DASHBOARD_CREATE]), async
       });
     }
 
-    // إضافة companyId إلى req.body للـ Controller
-    req.body.companyId = companyId;
-    req.body.userId = userId;
-
-    // ✅ إضافة الاسم الجديد للنسخة
-    const { default: Dashboard } = require('../models/Dashboard.model');
     const originalDashboard = await Dashboard.findOne({
       _id: req.params.id,
       companyId: companyId,
@@ -353,6 +406,8 @@ router.post('/:id/copy', checkPermissions([PERMISSIONS.DASHBOARD_CREATE]), async
       });
     }
 
+    req.body.companyId = companyId;
+    req.body.userId = userId;
     req.body.name = `${originalDashboard.name} (Copy)`;
     req.body.copyFrom = req.params.id;
 
@@ -370,7 +425,6 @@ router.post('/:id/copy', checkPermissions([PERMISSIONS.DASHBOARD_CREATE]), async
 // ===== DELETE - حذف لوحة تحكم =====
 router.delete('/:id', checkPermissions([PERMISSIONS.DASHBOARD_DELETE]), async (req, res) => {
   try {
-    // ✅ استخدام getCompanyId من الـ Helper
     const companyId = getCompanyId(req);
     const userId = req.user?.id;
 
@@ -389,8 +443,6 @@ router.delete('/:id', checkPermissions([PERMISSIONS.DASHBOARD_DELETE]), async (r
       });
     }
 
-    // ✅ لا يمكن حذف لوحة التحكم الافتراضية
-    const { default: Dashboard } = require('../models/Dashboard.model');
     const dashboard = await Dashboard.findOne({
       _id: req.params.id,
       companyId: companyId,
@@ -405,14 +457,13 @@ router.delete('/:id', checkPermissions([PERMISSIONS.DASHBOARD_DELETE]), async (r
       });
     }
 
-    if (dashboard.isDefault) {
+    if (dashboard.settings?.isDefault) {
       return res.status(400).json({
         success: false,
         message: 'Cannot delete default dashboard. Please set another dashboard as default first.'
       });
     }
 
-    // إضافة companyId إلى req.query للـ Controller
     req.query.companyId = companyId;
     req.query.userId = userId;
 
