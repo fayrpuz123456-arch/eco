@@ -2,34 +2,65 @@ const express = require('express');
 const router = express.Router();
 const Sensor = require('../models/Sensor.model');
 const { authMiddleware } = require('../../../core/middleware/auth');
+const { tenantMiddleware } = require('../../../core/middleware/tenant');
+const { getCompanyId, isValidCompanyId } = require('../../../core/utils/tenantHelper');
 const logger = require('../../../core/utils/logger');
 
 // ✅ تطبيق authMiddleware على جميع الراوتات
 router.use(authMiddleware);
+router.use(tenantMiddleware(true));
 
 // ===== GET - قائمة الحساسات =====
 router.get('/', async (req, res) => {
   try {
-    // استخدام companyId من الـ Body أو من الـ Auth
-    const companyId = req.body.companyId || req.companyId;
+    // ✅ استخدام getCompanyId بدلاً من req.body.companyId || req.companyId
+    const companyId = getCompanyId(req);
 
     if (!companyId) {
       return res.status(400).json({
         success: false,
-        message: 'companyId مطلوب في الـ Body أو من الـ Auth'
+        message: 'companyId مطلوب في الـ Body أو الـ Header (x-company-id) أو من الـ Auth'
       });
     }
 
-    const sensors = await Sensor.find({
-      companyId,
-      deletedAt: null
-    }).select('-__v');
+    // ✅ التحقق من صحة companyId
+    if (!isValidCompanyId(companyId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
+        received: companyId
+      });
+    }
+
+    const { type, status, limit = 50, page = 1 } = req.query;
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    const query = { companyId, deletedAt: null };
+    if (type) query.type = type;
+    if (status) query.status = status;
+
+    const [sensors, total] = await Promise.all([
+      Sensor.find(query)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(parseInt(limit))
+        .select('-__v'),
+      Sensor.countDocuments(query)
+    ]);
 
     res.json({
       success: true,
       message: 'Sensors retrieved successfully',
       data: sensors,
-      count: sensors.length
+      count: sensors.length,
+      meta: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        totalPages: Math.ceil(total / parseInt(limit)),
+        hasNext: skip + sensors.length < total,
+        hasPrev: parseInt(page) > 1
+      }
     });
   } catch (error) {
     logger.error('❌ GET /sensors error:', error);
@@ -44,7 +75,26 @@ router.get('/', async (req, res) => {
 // ===== POST - إنشاء حساس جديد =====
 router.post('/', async (req, res) => {
   try {
-    const userId = req.user.id;
+    const userId = req.user?.id;
+    
+    // ✅ استخدام getCompanyId بدلاً من bodyCompanyId || req.companyId
+    const companyId = getCompanyId(req);
+
+    if (!companyId || !userId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Unauthorized: user/company context missing from request'
+      });
+    }
+
+    // ✅ التحقق من صحة companyId
+    if (!isValidCompanyId(companyId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
+        received: companyId
+      });
+    }
 
     const {
       name,
@@ -61,27 +111,8 @@ router.post('/', async (req, res) => {
       serialNumber,
       operationalStatus,
       thresholds,
-      specifications,
-      companyId: bodyCompanyId
+      specifications
     } = req.body;
-
-    // ✅ استخدم companyId من الـ Body لو موجود، وإلا استخدم من الـ Request
-    const companyId = bodyCompanyId || req.companyId;
-
-    if (!companyId || !userId) {
-      return res.status(401).json({
-        success: false,
-        message: 'Unauthorized: user/company context missing from request'
-      });
-    }
-
-    // ✅ التحقق من صحة companyId
-    if (!companyId.startsWith('comp_')) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid company ID format. Must start with "comp_"'
-      });
-    }
 
     // ===== التحقق من الحقول المطلوبة =====
     if (!name || !code || !type || !unit || !machineId || !factoryId) {
@@ -119,7 +150,7 @@ router.post('/', async (req, res) => {
     const newSensor = new Sensor({
       name: name.trim(),
       code: code.toUpperCase().trim(),
-      type: finalType, // ✅ استخدام النوع الصحيح
+      type: finalType,
       unit: unit.trim(),
       machineId,
       factoryId,
@@ -148,7 +179,6 @@ router.post('/', async (req, res) => {
   } catch (error) {
     logger.error('❌ Error creating sensor:', error);
     
-    // ✅ تحسين رسائل الخطأ
     if (error.name === 'ValidationError') {
       const errors = Object.values(error.errors).map(err => err.message);
       return res.status(400).json({
@@ -169,13 +199,21 @@ router.post('/', async (req, res) => {
 // ===== GET - حساس بالمعرف =====
 router.get('/:id', async (req, res) => {
   try {
-    // استخدام companyId من الـ Body أو من الـ Auth
-    const companyId = req.body.companyId || req.companyId;
+    // ✅ استخدام getCompanyId
+    const companyId = getCompanyId(req);
 
     if (!companyId) {
       return res.status(400).json({
         success: false,
-        message: 'companyId مطلوب في الـ Body أو من الـ Auth'
+        message: 'companyId مطلوب في الـ Body أو الـ Header (x-company-id) أو من الـ Auth'
+      });
+    }
+
+    if (!isValidCompanyId(companyId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
+        received: companyId
       });
     }
 
@@ -207,17 +245,171 @@ router.get('/:id', async (req, res) => {
   }
 });
 
+// ===== GET - حساس بالكود =====
+router.get('/code/:code', async (req, res) => {
+  try {
+    // ✅ استخدام getCompanyId
+    const companyId = getCompanyId(req);
+
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'companyId مطلوب في الـ Body أو الـ Header (x-company-id) أو من الـ Auth'
+      });
+    }
+
+    if (!isValidCompanyId(companyId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
+        received: companyId
+      });
+    }
+
+    const code = req.params.code.toUpperCase();
+    const sensor = await Sensor.findOne({
+      code,
+      companyId,
+      deletedAt: null
+    });
+
+    if (!sensor) {
+      return res.status(404).json({
+        success: false,
+        message: 'Sensor not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Sensor retrieved successfully',
+      data: sensor
+    });
+  } catch (error) {
+    logger.error('❌ GET /sensors/code/:code error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching sensor by code',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
+  }
+});
+
+// ===== GET - حساسات ماكينة معينة =====
+router.get('/machine/:machineId', async (req, res) => {
+  try {
+    // ✅ استخدام getCompanyId
+    const companyId = getCompanyId(req);
+
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'companyId مطلوب في الـ Body أو الـ Header (x-company-id) أو من الـ Auth'
+      });
+    }
+
+    if (!isValidCompanyId(companyId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
+        received: companyId
+      });
+    }
+
+    const { machineId } = req.params;
+    const sensors = await Sensor.find({
+      machineId,
+      companyId,
+      deletedAt: null
+    }).select('-__v');
+
+    res.json({
+      success: true,
+      message: 'Sensors for machine retrieved successfully',
+      data: sensors,
+      count: sensors.length
+    });
+  } catch (error) {
+    logger.error('❌ GET /sensors/machine/:machineId error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching sensors for machine',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
+  }
+});
+
+// ===== GET - إحصائيات الحساسات =====
+router.get('/stats', async (req, res) => {
+  try {
+    // ✅ استخدام getCompanyId
+    const companyId = getCompanyId(req);
+
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'companyId مطلوب في الـ Body أو الـ Header (x-company-id) أو من الـ Auth'
+      });
+    }
+
+    if (!isValidCompanyId(companyId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
+        received: companyId
+      });
+    }
+
+    const [total, active, inactive, online, offline, maintenance] = await Promise.all([
+      Sensor.countDocuments({ companyId, deletedAt: null }),
+      Sensor.countDocuments({ companyId, status: 'active', deletedAt: null }),
+      Sensor.countDocuments({ companyId, status: 'inactive', deletedAt: null }),
+      Sensor.countDocuments({ companyId, operationalStatus: 'online', deletedAt: null }),
+      Sensor.countDocuments({ companyId, operationalStatus: 'offline', deletedAt: null }),
+      Sensor.countDocuments({ companyId, operationalStatus: 'maintenance', deletedAt: null })
+    ]);
+
+    res.json({
+      success: true,
+      message: 'Sensor statistics retrieved successfully',
+      data: {
+        total,
+        active,
+        inactive,
+        online,
+        offline,
+        maintenance
+      }
+    });
+  } catch (error) {
+    logger.error('❌ GET /sensors/stats error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching sensor statistics',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
+  }
+});
+
 // ===== PUT - تحديث حساس =====
 router.put('/:id', async (req, res) => {
   try {
-    // استخدام companyId من الـ Body أو من الـ Auth
-    const companyId = req.body.companyId || req.companyId;
-    const userId = req.user.id;
+    // ✅ استخدام getCompanyId
+    const companyId = getCompanyId(req);
+    const userId = req.user?.id;
 
     if (!companyId || !userId) {
       return res.status(401).json({
         success: false,
         message: 'Unauthorized: user/company context missing from request'
+      });
+    }
+
+    if (!isValidCompanyId(companyId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
+        received: companyId
       });
     }
 
@@ -238,6 +430,7 @@ router.put('/:id', async (req, res) => {
     delete req.body.companyId;
     delete req.body.machineId;
     delete req.body.factoryId;
+    delete req.body.code;
 
     const {
       name,
@@ -252,7 +445,6 @@ router.put('/:id', async (req, res) => {
 
     if (name) sensor.name = name.trim();
     if (type) {
-      // ✅ تطبيع النوع عند التحديث
       const normalizedType = type.toLowerCase();
       const validTypes = ['temperature', 'pressure', 'humidity', 'vibration', 'current', 'voltage', 'flow', 'level', 'speed', 'position', 'other'];
       sensor.type = validTypes.includes(normalizedType) ? normalizedType : 'other';
@@ -287,14 +479,22 @@ router.put('/:id', async (req, res) => {
 // ===== DELETE - حذف حساس (Soft Delete) =====
 router.delete('/:id', async (req, res) => {
   try {
-    // استخدام companyId من الـ Body أو من الـ Auth
-    const companyId = req.body.companyId || req.companyId;
-    const userId = req.user.id;
+    // ✅ استخدام getCompanyId
+    const companyId = getCompanyId(req);
+    const userId = req.user?.id;
 
     if (!companyId || !userId) {
       return res.status(401).json({
         success: false,
         message: 'Unauthorized: user/company context missing from request'
+      });
+    }
+
+    if (!isValidCompanyId(companyId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
+        received: companyId
       });
     }
 

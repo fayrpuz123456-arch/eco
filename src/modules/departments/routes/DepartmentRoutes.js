@@ -2,24 +2,36 @@ const express = require('express');
 const router = express.Router();
 const Department = require('../models/Department.model');
 const { authMiddleware } = require('../../../core/middleware/auth');
+const { tenantMiddleware } = require('../../../core/middleware/tenant');
+const { getCompanyId, isValidCompanyId } = require('../../../core/utils/tenantHelper');
 const logger = require('../../../core/utils/logger');
 
 // ============================================================
-// ✅ تطبيق authMiddleware على جميع راوتات الـ Department
+// ✅ تطبيق Middleware على جميع راوتات الـ Department
 // ============================================================
 router.use(authMiddleware);
+router.use(tenantMiddleware(true));
 
 // ============================================================
 // GET - قائمة الأقسام (مع Pagination و Filtering)
 // ============================================================
 router.get('/', async (req, res) => {
   try {
-    const companyId = req.companyId;
+    // ✅ استخدام getCompanyId من الـ Helper
+    const companyId = getCompanyId(req);
     
     if (!companyId) {
-      return res.status(401).json({
+      return res.status(400).json({
         success: false,
-        message: 'Unauthorized: companyId not found on request'
+        message: 'companyId مطلوب في الـ Body أو الـ Header (x-company-id) أو من الـ Auth'
+      });
+    }
+
+    if (!isValidCompanyId(companyId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
+        received: companyId
       });
     }
 
@@ -68,16 +80,18 @@ router.get('/', async (req, res) => {
       success: true,
       message: 'Departments retrieved successfully',
       data: departments,
-      pagination: {
+      count: departments.length,
+      meta: {
         page,
         limit,
         total,
-        pages: Math.ceil(total / limit)
-      },
-      count: departments.length
+        totalPages: Math.ceil(total / limit),
+        hasNext: skip + departments.length < total,
+        hasPrev: page > 1
+      }
     });
   } catch (error) {
-    logger.error('GET /departments error:', error);
+    logger.error('❌ GET /departments error:', error);
     res.status(500).json({
       success: false,
       message: 'Error fetching departments',
@@ -91,12 +105,21 @@ router.get('/', async (req, res) => {
 // ============================================================
 router.get('/stats', async (req, res) => {
   try {
-    const companyId = req.companyId;
+    // ✅ استخدام getCompanyId من الـ Helper
+    const companyId = getCompanyId(req);
     
     if (!companyId) {
-      return res.status(401).json({
+      return res.status(400).json({
         success: false,
-        message: 'Unauthorized: companyId not found on request'
+        message: 'companyId مطلوب في الـ Body أو الـ Header (x-company-id) أو من الـ Auth'
+      });
+    }
+
+    if (!isValidCompanyId(companyId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
+        received: companyId
       });
     }
 
@@ -114,7 +137,7 @@ router.get('/stats', async (req, res) => {
       }
     });
   } catch (error) {
-    logger.error('GET /departments/stats error:', error);
+    logger.error('❌ GET /departments/stats error:', error);
     res.status(500).json({
       success: false,
       message: 'Error fetching department statistics',
@@ -128,12 +151,21 @@ router.get('/stats', async (req, res) => {
 // ============================================================
 router.get('/factory/:factoryId', async (req, res) => {
   try {
-    const companyId = req.companyId;
+    // ✅ استخدام getCompanyId من الـ Helper
+    const companyId = getCompanyId(req);
     
     if (!companyId) {
-      return res.status(401).json({
+      return res.status(400).json({
         success: false,
-        message: 'Unauthorized: companyId not found on request'
+        message: 'companyId مطلوب في الـ Body أو الـ Header (x-company-id) أو من الـ Auth'
+      });
+    }
+
+    if (!isValidCompanyId(companyId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
+        received: companyId
       });
     }
 
@@ -149,7 +181,7 @@ router.get('/factory/:factoryId', async (req, res) => {
       count: departments.length
     });
   } catch (error) {
-    logger.error('GET /departments/factory/:factoryId error:', error);
+    logger.error('❌ GET /departments/factory/:factoryId error:', error);
     res.status(500).json({
       success: false,
       message: 'Error fetching departments',
@@ -163,12 +195,21 @@ router.get('/factory/:factoryId', async (req, res) => {
 // ============================================================
 router.get('/type/:type', async (req, res) => {
   try {
-    const companyId = req.companyId;
+    // ✅ استخدام getCompanyId من الـ Helper
+    const companyId = getCompanyId(req);
     
     if (!companyId) {
-      return res.status(401).json({
+      return res.status(400).json({
         success: false,
-        message: 'Unauthorized: companyId not found on request'
+        message: 'companyId مطلوب في الـ Body أو الـ Header (x-company-id) أو من الـ Auth'
+      });
+    }
+
+    if (!isValidCompanyId(companyId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
+        received: companyId
       });
     }
 
@@ -186,7 +227,7 @@ router.get('/type/:type', async (req, res) => {
       count: departments.length
     });
   } catch (error) {
-    logger.error('GET /departments/type/:type error:', error);
+    logger.error('❌ GET /departments/type/:type error:', error);
     res.status(500).json({
       success: false,
       message: 'Error fetching departments',
@@ -200,12 +241,21 @@ router.get('/type/:type', async (req, res) => {
 // ============================================================
 router.get('/active', async (req, res) => {
   try {
-    const companyId = req.companyId;
+    // ✅ استخدام getCompanyId من الـ Helper
+    const companyId = getCompanyId(req);
     
     if (!companyId) {
-      return res.status(401).json({
+      return res.status(400).json({
         success: false,
-        message: 'Unauthorized: companyId not found on request'
+        message: 'companyId مطلوب في الـ Body أو الـ Header (x-company-id) أو من الـ Auth'
+      });
+    }
+
+    if (!isValidCompanyId(companyId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
+        received: companyId
       });
     }
 
@@ -219,7 +269,7 @@ router.get('/active', async (req, res) => {
       count: departments.length
     });
   } catch (error) {
-    logger.error('GET /departments/active error:', error);
+    logger.error('❌ GET /departments/active error:', error);
     res.status(500).json({
       success: false,
       message: 'Error fetching departments',
@@ -233,12 +283,21 @@ router.get('/active', async (req, res) => {
 // ============================================================
 router.get('/:id', async (req, res) => {
   try {
-    const companyId = req.companyId;
+    // ✅ استخدام getCompanyId من الـ Helper
+    const companyId = getCompanyId(req);
     
     if (!companyId) {
-      return res.status(401).json({
+      return res.status(400).json({
         success: false,
-        message: 'Unauthorized: companyId not found on request'
+        message: 'companyId مطلوب في الـ Body أو الـ Header (x-company-id) أو من الـ Auth'
+      });
+    }
+
+    if (!isValidCompanyId(companyId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
+        received: companyId
       });
     }
 
@@ -261,7 +320,7 @@ router.get('/:id', async (req, res) => {
       data: department
     });
   } catch (error) {
-    logger.error('GET /departments/:id error:', error);
+    logger.error('❌ GET /departments/:id error:', error);
     res.status(500).json({
       success: false,
       message: 'Error fetching department',
@@ -275,12 +334,21 @@ router.get('/:id', async (req, res) => {
 // ============================================================
 router.get('/search/:term', async (req, res) => {
   try {
-    const companyId = req.companyId;
+    // ✅ استخدام getCompanyId من الـ Helper
+    const companyId = getCompanyId(req);
     
     if (!companyId) {
-      return res.status(401).json({
+      return res.status(400).json({
         success: false,
-        message: 'Unauthorized: companyId not found on request'
+        message: 'companyId مطلوب في الـ Body أو الـ Header (x-company-id) أو من الـ Auth'
+      });
+    }
+
+    if (!isValidCompanyId(companyId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
+        received: companyId
       });
     }
 
@@ -298,10 +366,62 @@ router.get('/search/:term', async (req, res) => {
       count: departments.length
     });
   } catch (error) {
-    logger.error('GET /departments/search/:term error:', error);
+    logger.error('❌ GET /departments/search/:term error:', error);
     res.status(500).json({
       success: false,
       message: 'Error searching departments',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
+  }
+});
+
+// ============================================================
+// GET - قسم بالكود
+// ============================================================
+router.get('/code/:code', async (req, res) => {
+  try {
+    // ✅ استخدام getCompanyId من الـ Helper
+    const companyId = getCompanyId(req);
+    
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'companyId مطلوب في الـ Body أو الـ Header (x-company-id) أو من الـ Auth'
+      });
+    }
+
+    if (!isValidCompanyId(companyId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
+        received: companyId
+      });
+    }
+
+    const code = req.params.code.toUpperCase();
+    const department = await Department.findOne({
+      code,
+      companyId,
+      deletedAt: null
+    });
+
+    if (!department) {
+      return res.status(404).json({
+        success: false,
+        message: 'Department not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Department retrieved successfully',
+      data: department
+    });
+  } catch (error) {
+    logger.error('❌ GET /departments/code/:code error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching department by code',
       error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
@@ -312,10 +432,9 @@ router.get('/search/:term', async (req, res) => {
 // ============================================================
 router.post('/', async (req, res) => {
   try {
-    const userId = req.user.id;
-
-    // ✅ استخدم companyId من الـ Body لو موجود، وإلا استخدم من الـ Request
-    const companyId = req.body.companyId || req.companyId;
+    // ✅ استخدام getCompanyId من الـ Helper
+    const companyId = getCompanyId(req);
+    const userId = req.user?.id;
 
     if (!companyId || !userId) {
       return res.status(401).json({
@@ -324,11 +443,11 @@ router.post('/', async (req, res) => {
       });
     }
 
-    // ✅ التحقق من صحة companyId
-    if (!companyId.startsWith('comp_')) {
+    if (!isValidCompanyId(companyId)) {
       return res.status(400).json({
         success: false,
-        message: 'Invalid company ID format. Must start with "comp_"'
+        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
+        received: companyId
       });
     }
 
@@ -341,6 +460,7 @@ router.post('/', async (req, res) => {
       });
     }
 
+    // ✅ التحقق من عدم وجود قسم بنفس الكود
     const existingDepartment = await Department.findOne({
       code: code.toUpperCase(),
       factoryId,
@@ -375,7 +495,24 @@ router.post('/', async (req, res) => {
       data: savedDepartment
     });
   } catch (error) {
-    logger.error('POST /departments error:', error);
+    logger.error('❌ POST /departments error:', error);
+    
+    if (error.name === 'ValidationError') {
+      const errors = Object.values(error.errors).map(err => err.message);
+      return res.status(400).json({
+        success: false,
+        message: 'Validation error',
+        errors: errors
+      });
+    }
+
+    if (error.code === 11000) {
+      return res.status(409).json({
+        success: false,
+        message: 'Department with this code already exists'
+      });
+    }
+
     res.status(500).json({
       success: false,
       message: 'Error creating department',
@@ -389,13 +526,22 @@ router.post('/', async (req, res) => {
 // ============================================================
 router.put('/:id', async (req, res) => {
   try {
-    const companyId = req.companyId;
-    const userId = req.user.id;
+    // ✅ استخدام getCompanyId من الـ Helper
+    const companyId = getCompanyId(req);
+    const userId = req.user?.id;
 
     if (!companyId || !userId) {
       return res.status(401).json({
         success: false,
         message: 'Unauthorized: user/company context missing from request'
+      });
+    }
+
+    if (!isValidCompanyId(companyId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
+        received: companyId
       });
     }
 
@@ -414,6 +560,11 @@ router.put('/:id', async (req, res) => {
       });
     }
 
+    // ✅ منع تحديث companyId و code و factoryId
+    delete req.body.companyId;
+    delete req.body.code;
+    delete req.body.factoryId;
+
     if (name) department.name = name.trim();
     if (type) department.type = type;
     if (description !== undefined) department.description = description ? description.trim() : null;
@@ -430,7 +581,7 @@ router.put('/:id', async (req, res) => {
       data: updatedDepartment
     });
   } catch (error) {
-    logger.error('PUT /departments/:id error:', error);
+    logger.error('❌ PUT /departments/:id error:', error);
     res.status(500).json({
       success: false,
       message: 'Error updating department',
@@ -444,8 +595,9 @@ router.put('/:id', async (req, res) => {
 // ============================================================
 router.patch('/:id', async (req, res) => {
   try {
-    const companyId = req.companyId;
-    const userId = req.user.id;
+    // ✅ استخدام getCompanyId من الـ Helper
+    const companyId = getCompanyId(req);
+    const userId = req.user?.id;
 
     if (!companyId || !userId) {
       return res.status(401).json({
@@ -454,11 +606,22 @@ router.patch('/:id', async (req, res) => {
       });
     }
 
+    if (!isValidCompanyId(companyId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
+        received: companyId
+      });
+    }
+
     const updates = req.body;
     delete updates._id;
     delete updates.__v;
     delete updates.createdAt;
     delete updates.createdBy;
+    delete updates.companyId;
+    delete updates.code;
+    delete updates.factoryId;
 
     const department = await Department.findOne({
       _id: req.params.id,
@@ -491,7 +654,7 @@ router.patch('/:id', async (req, res) => {
       data: updatedDepartment
     });
   } catch (error) {
-    logger.error('PATCH /departments/:id error:', error);
+    logger.error('❌ PATCH /departments/:id error:', error);
     res.status(500).json({
       success: false,
       message: 'Error updating department',
@@ -505,13 +668,22 @@ router.patch('/:id', async (req, res) => {
 // ============================================================
 router.delete('/:id', async (req, res) => {
   try {
-    const companyId = req.companyId;
-    const userId = req.user.id;
+    // ✅ استخدام getCompanyId من الـ Helper
+    const companyId = getCompanyId(req);
+    const userId = req.user?.id;
 
     if (!companyId || !userId) {
       return res.status(401).json({
         success: false,
         message: 'Unauthorized: user/company context missing from request'
+      });
+    }
+
+    if (!isValidCompanyId(companyId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
+        received: companyId
       });
     }
 
@@ -525,6 +697,28 @@ router.delete('/:id', async (req, res) => {
       return res.status(404).json({
         success: false,
         message: 'Department not found'
+      });
+    }
+
+    // ✅ التحقق من وجود ماكينات تابعة للقسم
+    const { default: Machine } = require('../machines/models/Machine.model');
+    const machinesCount = await Machine.countDocuments({ departmentId: department._id, deletedAt: null });
+    
+    if (machinesCount > 0) {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot delete department. It has ${machinesCount} associated machine(s)`
+      });
+    }
+
+    // ✅ التحقق من وجود Production Lines تابعة للقسم
+    const { default: ProductionLine } = require('../productionLines/models/ProductionLine.model');
+    const linesCount = await ProductionLine.countDocuments({ departmentId: department._id, deletedAt: null });
+    
+    if (linesCount > 0) {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot delete department. It has ${linesCount} associated production line(s)`
       });
     }
 
@@ -543,7 +737,7 @@ router.delete('/:id', async (req, res) => {
       }
     });
   } catch (error) {
-    logger.error('DELETE /departments/:id error:', error);
+    logger.error('❌ DELETE /departments/:id error:', error);
     res.status(500).json({
       success: false,
       message: 'Error deleting department',
@@ -557,13 +751,23 @@ router.delete('/:id', async (req, res) => {
 // ============================================================
 router.delete('/:id/permanent', async (req, res) => {
   try {
-    const companyId = req.companyId;
-    const userRole = req.user.role || 'viewer';
+    // ✅ استخدام getCompanyId من الـ Helper
+    const companyId = getCompanyId(req);
+    const userId = req.user?.id;
+    const userRole = req.user?.role || 'viewer';
 
-    if (!companyId) {
+    if (!companyId || !userId) {
       return res.status(401).json({
         success: false,
-        message: 'Unauthorized: companyId not found on request'
+        message: 'Unauthorized: user/company context missing from request'
+      });
+    }
+
+    if (!isValidCompanyId(companyId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
+        received: companyId
       });
     }
 
@@ -597,7 +801,7 @@ router.delete('/:id/permanent', async (req, res) => {
       }
     });
   } catch (error) {
-    logger.error('DELETE /departments/:id/permanent error:', error);
+    logger.error('❌ DELETE /departments/:id/permanent error:', error);
     res.status(500).json({
       success: false,
       message: 'Error permanently deleting department',
@@ -611,14 +815,23 @@ router.delete('/:id/permanent', async (req, res) => {
 // ============================================================
 router.post('/:id/restore', async (req, res) => {
   try {
-    const companyId = req.companyId;
-    const userId = req.user.id;
-    const userRole = req.user.role || 'viewer';
+    // ✅ استخدام getCompanyId من الـ Helper
+    const companyId = getCompanyId(req);
+    const userId = req.user?.id;
+    const userRole = req.user?.role || 'viewer';
 
     if (!companyId || !userId) {
       return res.status(401).json({
         success: false,
         message: 'Unauthorized: user/company context missing from request'
+      });
+    }
+
+    if (!isValidCompanyId(companyId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
+        received: companyId
       });
     }
 
@@ -657,7 +870,7 @@ router.post('/:id/restore', async (req, res) => {
       data: restoredDepartment
     });
   } catch (error) {
-    logger.error('POST /departments/:id/restore error:', error);
+    logger.error('❌ POST /departments/:id/restore error:', error);
     res.status(500).json({
       success: false,
       message: 'Error restoring department',
@@ -671,13 +884,22 @@ router.post('/:id/restore', async (req, res) => {
 // ============================================================
 router.put('/:id/status', async (req, res) => {
   try {
-    const companyId = req.companyId;
-    const userId = req.user.id;
+    // ✅ استخدام getCompanyId من الـ Helper
+    const companyId = getCompanyId(req);
+    const userId = req.user?.id;
 
     if (!companyId || !userId) {
       return res.status(401).json({
         success: false,
         message: 'Unauthorized: user/company context missing from request'
+      });
+    }
+
+    if (!isValidCompanyId(companyId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
+        received: companyId
       });
     }
 
@@ -723,7 +945,7 @@ router.put('/:id/status', async (req, res) => {
       data: updatedDepartment
     });
   } catch (error) {
-    logger.error('PUT /departments/:id/status error:', error);
+    logger.error('❌ PUT /departments/:id/status error:', error);
     res.status(500).json({
       success: false,
       message: 'Error updating department status',
@@ -737,13 +959,22 @@ router.put('/:id/status', async (req, res) => {
 // ============================================================
 router.post('/batch/delete', async (req, res) => {
   try {
-    const companyId = req.companyId;
-    const userId = req.user.id;
+    // ✅ استخدام getCompanyId من الـ Helper
+    const companyId = getCompanyId(req);
+    const userId = req.user?.id;
 
     if (!companyId || !userId) {
       return res.status(401).json({
         success: false,
         message: 'Unauthorized: user/company context missing from request'
+      });
+    }
+
+    if (!isValidCompanyId(companyId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
+        received: companyId
       });
     }
 
@@ -788,7 +1019,7 @@ router.post('/batch/delete', async (req, res) => {
       data: results
     });
   } catch (error) {
-    logger.error('POST /departments/batch/delete error:', error);
+    logger.error('❌ POST /departments/batch/delete error:', error);
     res.status(500).json({
       success: false,
       message: 'Error deleting departments',
@@ -802,13 +1033,22 @@ router.post('/batch/delete', async (req, res) => {
 // ============================================================
 router.post('/batch/update', async (req, res) => {
   try {
-    const companyId = req.companyId;
-    const userId = req.user.id;
+    // ✅ استخدام getCompanyId من الـ Helper
+    const companyId = getCompanyId(req);
+    const userId = req.user?.id;
 
     if (!companyId || !userId) {
       return res.status(401).json({
         success: false,
         message: 'Unauthorized: user/company context missing from request'
+      });
+    }
+
+    if (!isValidCompanyId(companyId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
+        received: companyId
       });
     }
 
@@ -865,7 +1105,7 @@ router.post('/batch/update', async (req, res) => {
       data: results
     });
   } catch (error) {
-    logger.error('POST /departments/batch/update error:', error);
+    logger.error('❌ POST /departments/batch/update error:', error);
     res.status(500).json({
       success: false,
       message: 'Error updating departments',

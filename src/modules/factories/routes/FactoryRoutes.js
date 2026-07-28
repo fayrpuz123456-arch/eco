@@ -3,21 +3,17 @@ const router = express.Router();
 const Factory = require('../models/Factory.model');
 const { authMiddleware } = require('../../../core/middleware/auth');
 const { tenantMiddleware } = require('../../../core/middleware/tenant');
+const { getCompanyId, isValidCompanyId } = require('../../../core/utils/tenantHelper');
 const logger = require('../../../core/utils/logger');
 
 // ✅ تطبيق الـ Middleware
 router.use(authMiddleware);
 router.use(tenantMiddleware(true));
 
-// ===== Helper function للحصول على companyId =====
-const getCompanyId = (req) => {
-  return req.body?.companyId || req.headers?.['x-company-id'] || req.companyId;
-};
-
 // ===== GET - قائمة المصانع =====
 router.get('/', async (req, res) => {
   try {
-    // ✅ استخدام companyId من الـ Body أو الـ Header أو الـ Auth
+    // ✅ استخدام getCompanyId من الـ Helper
     const companyId = getCompanyId(req);
 
     // ✅ تسجيل للـ Debug
@@ -35,20 +31,36 @@ router.get('/', async (req, res) => {
       });
     }
 
+    // ✅ التحقق من صحة companyId
+    if (!isValidCompanyId(companyId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
+        received: companyId
+      });
+    }
+
     // ✅ دعم Pagination
-    const { page = 1, limit = 10 } = req.query;
+    const { page = 1, limit = 10, search } = req.query;
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
+    // ✅ بناء الـ Query مع الـ Search
+    const query = { companyId, deletedAt: null };
+    if (search) {
+      query.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { code: { $regex: search, $options: 'i' } },
+        { industry: { $regex: search, $options: 'i' } }
+      ];
+    }
+
     const [factories, total] = await Promise.all([
-      Factory.find({ 
-        companyId,
-        deletedAt: null 
-      })
-      .skip(skip)
-      .limit(parseInt(limit))
-      .select('-__v')
-      .sort({ createdAt: -1 }),
-      Factory.countDocuments({ companyId, deletedAt: null })
+      Factory.find(query)
+        .skip(skip)
+        .limit(parseInt(limit))
+        .select('-__v')
+        .sort({ createdAt: -1 }),
+      Factory.countDocuments(query)
     ]);
 
     res.json({
@@ -78,13 +90,21 @@ router.get('/', async (req, res) => {
 // ===== GET - مصنع بالمعرف =====
 router.get('/:id', async (req, res) => {
   try {
-    // ✅ استخدام companyId من الـ Body أو الـ Header أو الـ Auth
+    // ✅ استخدام getCompanyId من الـ Helper
     const companyId = getCompanyId(req);
 
     if (!companyId) {
       return res.status(400).json({
         success: false,
         message: 'companyId مطلوب في الـ Body أو الـ Header (x-company-id) أو من الـ Auth'
+      });
+    }
+
+    if (!isValidCompanyId(companyId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
+        received: companyId
       });
     }
 
@@ -119,13 +139,21 @@ router.get('/:id', async (req, res) => {
 // ===== GET - مصنع بالكود =====
 router.get('/code/:code', async (req, res) => {
   try {
-    // ✅ استخدام companyId من الـ Body أو الـ Header أو الـ Auth
+    // ✅ استخدام getCompanyId من الـ Helper
     const companyId = getCompanyId(req);
 
     if (!companyId) {
       return res.status(400).json({
         success: false,
         message: 'companyId مطلوب في الـ Body أو الـ Header (x-company-id) أو من الـ Auth'
+      });
+    }
+
+    if (!isValidCompanyId(companyId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
+        received: companyId
       });
     }
 
@@ -161,7 +189,7 @@ router.get('/code/:code', async (req, res) => {
 // ===== POST - إنشاء مصنع جديد =====
 router.post('/', async (req, res) => {
   try {
-    // ✅ استخدام companyId من الـ Body أو الـ Header أو الـ Auth
+    // ✅ استخدام getCompanyId من الـ Helper
     const companyId = getCompanyId(req);
     const userId = req.user?.id;
 
@@ -172,11 +200,8 @@ router.post('/', async (req, res) => {
       });
     }
 
-    // ✅ التحقق من صحة companyId (يدعم ObjectId و comp_)
-    const isValidObjectId = /^[0-9a-fA-F]{24}$/.test(companyId);
-    const isValidCompanyCode = companyId.startsWith('comp_') && companyId.length >= 10;
-    
-    if (!isValidObjectId && !isValidCompanyCode) {
+    // ✅ التحقق من صحة companyId
+    if (!isValidCompanyId(companyId)) {
       return res.status(400).json({
         success: false,
         message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
@@ -184,9 +209,9 @@ router.post('/', async (req, res) => {
       });
     }
 
-    const { name, code, industry, contactEmail, contactPhone, address } = req.body;
+    const { name, code, industry, contactEmail, contactPhone, address, description } = req.body;
 
-    // التحقق من البيانات المطلوبة
+    // ✅ التحقق من البيانات المطلوبة
     if (!name || !code || !industry || !contactEmail) {
       return res.status(400).json({
         success: false,
@@ -194,7 +219,7 @@ router.post('/', async (req, res) => {
       });
     }
 
-    // التحقق من عدم وجود مصنع بنفس الكود في نفس الشركة
+    // ✅ التحقق من عدم وجود مصنع بنفس الكود في نفس الشركة
     const existingFactory = await Factory.findOne({ 
       code: code.toUpperCase(), 
       companyId,
@@ -208,15 +233,16 @@ router.post('/', async (req, res) => {
       });
     }
 
-    // إنشاء مصنع جديد
+    // ✅ إنشاء مصنع جديد
     const newFactory = new Factory({
       name: name.trim(),
       code: code.toUpperCase().trim(),
       industry,
       contactEmail: contactEmail.trim(),
-      companyId, // ✅ استخدام companyId الصحيح
+      companyId,
       contactPhone: contactPhone || null,
       address: address || {},
+      description: description || null,
       createdBy: userId,
       updatedBy: userId,
       status: 'active'
@@ -259,7 +285,7 @@ router.post('/', async (req, res) => {
 // ===== PUT - تحديث مصنع =====
 router.put('/:id', async (req, res) => {
   try {
-    // ✅ استخدام companyId من الـ Body أو الـ Header أو الـ Auth
+    // ✅ استخدام getCompanyId من الـ Helper
     const companyId = getCompanyId(req);
     const userId = req.user?.id;
 
@@ -267,6 +293,14 @@ router.put('/:id', async (req, res) => {
       return res.status(401).json({
         success: false,
         message: 'Unauthorized: user/company context missing from request'
+      });
+    }
+
+    if (!isValidCompanyId(companyId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
+        received: companyId
       });
     }
 
@@ -283,18 +317,19 @@ router.put('/:id', async (req, res) => {
       });
     }
 
-    // منع تحديث companyId و code
+    // ✅ منع تحديث companyId و code
     delete req.body.companyId;
     delete req.body.code;
 
-    const { name, industry, contactEmail, contactPhone, address, status } = req.body;
+    const { name, industry, contactEmail, contactPhone, address, description, status } = req.body;
 
-    // تحديث الحقول
+    // ✅ تحديث الحقول
     if (name) factory.name = name.trim();
     if (industry) factory.industry = industry;
     if (contactEmail) factory.contactEmail = contactEmail.trim();
     if (contactPhone) factory.contactPhone = contactPhone;
     if (address) factory.address = address;
+    if (description !== undefined) factory.description = description;
     if (status) factory.status = status;
 
     factory.updatedBy = userId;
@@ -320,7 +355,7 @@ router.put('/:id', async (req, res) => {
 // ===== DELETE - حذف مصنع (Soft Delete) =====
 router.delete('/:id', async (req, res) => {
   try {
-    // ✅ استخدام companyId من الـ Body أو الـ Header أو الـ Auth
+    // ✅ استخدام getCompanyId من الـ Helper
     const companyId = getCompanyId(req);
     const userId = req.user?.id;
 
@@ -328,6 +363,14 @@ router.delete('/:id', async (req, res) => {
       return res.status(401).json({
         success: false,
         message: 'Unauthorized: user/company context missing from request'
+      });
+    }
+
+    if (!isValidCompanyId(companyId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
+        received: companyId
       });
     }
 
@@ -341,6 +384,17 @@ router.delete('/:id', async (req, res) => {
       return res.status(404).json({
         success: false,
         message: 'Factory not found'
+      });
+    }
+
+    // ✅ التحقق من وجود مستخدمين تابعين للمصنع قبل الحذف
+    const { default: User } = require('../users/models/User.model');
+    const usersCount = await User.countDocuments({ factoryId: factory._id, deletedAt: null });
+    
+    if (usersCount > 0) {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot delete factory. It has ${usersCount} associated user(s)`
       });
     }
 
@@ -373,13 +427,21 @@ router.delete('/:id', async (req, res) => {
 // ===== GET - إحصائيات المصانع =====
 router.get('/stats', async (req, res) => {
   try {
-    // ✅ استخدام companyId من الـ Body أو الـ Header أو الـ Auth
+    // ✅ استخدام getCompanyId من الـ Helper
     const companyId = getCompanyId(req);
 
     if (!companyId) {
       return res.status(400).json({
         success: false,
         message: 'companyId مطلوب في الـ Body أو الـ Header (x-company-id) أو من الـ Auth'
+      });
+    }
+
+    if (!isValidCompanyId(companyId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
+        received: companyId
       });
     }
 
