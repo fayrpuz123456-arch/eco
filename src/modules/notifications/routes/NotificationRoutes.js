@@ -3,6 +3,7 @@ const router = express.Router();
 const Notification = require('../models/Notification.model');
 const { authMiddleware } = require('../../../core/middleware/auth');
 const { tenantMiddleware } = require('../../../core/middleware/tenant');
+const { getCompanyId, isValidCompanyId } = require('../../../core/utils/tenantHelper');
 const logger = require('../../../core/utils/logger');
 
 // ✅ تطبيق الـ Middleware
@@ -12,14 +13,22 @@ router.use(tenantMiddleware(true));
 // ===== GET - قائمة الإشعارات للمستخدم =====
 router.get('/', async (req, res) => {
   try {
-    // ✅ استخدام companyId من الـ Body أو من الـ Auth
-    const companyId = req.body.companyId || req.companyId;
+    // ✅ استخدام getCompanyId من الـ Helper
+    const companyId = getCompanyId(req);
     const userId = req.user?.id || req.query.userId;
 
     if (!companyId) {
       return res.status(400).json({
         success: false,
-        message: 'companyId مطلوب في الـ Body أو من الـ Auth'
+        message: 'companyId مطلوب في الـ Body أو الـ Header (x-company-id) أو من الـ Auth'
+      });
+    }
+
+    if (!isValidCompanyId(companyId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
+        received: companyId
       });
     }
 
@@ -31,20 +40,38 @@ router.get('/', async (req, res) => {
     }
 
     const { limit = 50, page = 1, status, type } = req.query;
+    const skip = (parseInt(page) - 1) * parseInt(limit);
 
-    const result = await Notification.findByUser(userId, {
-      limit: parseInt(limit),
-      page: parseInt(page),
-      status,
-      type,
-      companyId // ✅ إضافة companyId للفلترة
-    });
+    const query = { 
+      userId,
+      companyId,
+      deletedAt: null 
+    };
+    if (status) query.status = status;
+    if (type) query.type = type;
+
+    const [notifications, total] = await Promise.all([
+      Notification.find(query)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(parseInt(limit))
+        .select('-__v'),
+      Notification.countDocuments(query)
+    ]);
 
     res.json({
       success: true,
       message: 'Notifications retrieved successfully',
-      data: result.data,
-      meta: result.meta
+      data: notifications,
+      count: notifications.length,
+      meta: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        totalPages: Math.ceil(total / parseInt(limit)),
+        hasNext: skip + notifications.length < total,
+        hasPrev: parseInt(page) > 1
+      }
     });
   } catch (error) {
     logger.error('❌ Error fetching notifications:', error);
@@ -59,14 +86,22 @@ router.get('/', async (req, res) => {
 // ===== GET - الإشعارات غير المقروءة =====
 router.get('/unread', async (req, res) => {
   try {
-    // ✅ استخدام companyId من الـ Body أو من الـ Auth
-    const companyId = req.body.companyId || req.companyId;
+    // ✅ استخدام getCompanyId من الـ Helper
+    const companyId = getCompanyId(req);
     const userId = req.user?.id || req.query.userId;
 
     if (!companyId) {
       return res.status(400).json({
         success: false,
-        message: 'companyId مطلوب في الـ Body أو من الـ Auth'
+        message: 'companyId مطلوب في الـ Body أو الـ Header (x-company-id) أو من الـ Auth'
+      });
+    }
+
+    if (!isValidCompanyId(companyId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
+        received: companyId
       });
     }
 
@@ -77,7 +112,13 @@ router.get('/unread', async (req, res) => {
       });
     }
 
-    const notifications = await Notification.findUnread(userId, companyId);
+    const notifications = await Notification.find({
+      userId,
+      companyId,
+      status: { $in: ['pending', 'sent'] },
+      readAt: null,
+      deletedAt: null
+    }).sort({ createdAt: -1 }).select('-__v');
 
     res.json({
       success: true,
@@ -98,14 +139,22 @@ router.get('/unread', async (req, res) => {
 // ===== GET - إحصائيات الإشعارات =====
 router.get('/stats', async (req, res) => {
   try {
-    // ✅ استخدام companyId من الـ Body أو من الـ Auth
-    const companyId = req.body.companyId || req.companyId;
+    // ✅ استخدام getCompanyId من الـ Helper
+    const companyId = getCompanyId(req);
     const userId = req.user?.id || req.query.userId;
 
     if (!companyId) {
       return res.status(400).json({
         success: false,
-        message: 'companyId مطلوب في الـ Body أو من الـ Auth'
+        message: 'companyId مطلوب في الـ Body أو الـ Header (x-company-id) أو من الـ Auth'
+      });
+    }
+
+    if (!isValidCompanyId(companyId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
+        received: companyId
       });
     }
 
@@ -116,12 +165,57 @@ router.get('/stats', async (req, res) => {
       });
     }
 
-    const stats = await Notification.getStats(userId, companyId);
+    const [total, unread, read, dismissed, scheduled] = await Promise.all([
+      Notification.countDocuments({ userId, companyId, deletedAt: null }),
+      Notification.countDocuments({ 
+        userId, 
+        companyId, 
+        status: { $in: ['pending', 'sent'] },
+        readAt: null,
+        deletedAt: null 
+      }),
+      Notification.countDocuments({ 
+        userId, 
+        companyId, 
+        status: 'read',
+        readAt: { $ne: null },
+        deletedAt: null 
+      }),
+      Notification.countDocuments({ 
+        userId, 
+        companyId, 
+        status: 'dismissed',
+        deletedAt: null 
+      }),
+      Notification.countDocuments({ 
+        userId, 
+        companyId, 
+        status: 'scheduled',
+        scheduledAt: { $gt: new Date() },
+        deletedAt: null 
+      })
+    ]);
+
+    // توزيع الإشعارات حسب النوع
+    const byType = await Notification.aggregate([
+      { $match: { userId, companyId, deletedAt: null } },
+      { $group: { _id: '$type', count: { $sum: 1 } } }
+    ]);
 
     res.json({
       success: true,
       message: 'Notification statistics retrieved successfully',
-      data: stats
+      data: {
+        total,
+        unread,
+        read,
+        dismissed,
+        scheduled,
+        byType: byType.reduce((acc, item) => {
+          acc[item._id] = item.count;
+          return acc;
+        }, {})
+      }
     });
   } catch (error) {
     logger.error('❌ Error fetching notification stats:', error);
@@ -136,9 +230,9 @@ router.get('/stats', async (req, res) => {
 // ===== POST - إنشاء إشعار جديد =====
 router.post('/', async (req, res) => {
   try {
-    // ✅ استخدام companyId من الـ Body أو من الـ Auth
-    const companyId = req.body.companyId || req.companyId;
-    const userId = req.user.id;
+    // ✅ استخدام getCompanyId من الـ Helper
+    const companyId = getCompanyId(req);
+    const userId = req.user?.id;
 
     if (!companyId || !userId) {
       return res.status(401).json({
@@ -147,11 +241,11 @@ router.post('/', async (req, res) => {
       });
     }
 
-    // ✅ التحقق من صحة companyId
-    if (!companyId.startsWith('comp_')) {
+    if (!isValidCompanyId(companyId)) {
       return res.status(400).json({
         success: false,
-        message: 'Invalid company ID format. Must start with "comp_"'
+        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
+        received: companyId
       });
     }
 
@@ -180,7 +274,7 @@ router.post('/', async (req, res) => {
     }
 
     const newNotification = new Notification({
-      companyId, // ✅ استخدام companyId الصحيح
+      companyId,
       userId: targetUserId,
       createdBy: userId,
       updatedBy: userId,
@@ -235,9 +329,9 @@ router.post('/', async (req, res) => {
 // ===== PUT - وضع علامة كمقروء =====
 router.put('/:id/read', async (req, res) => {
   try {
-    // ✅ استخدام companyId من الـ Body أو من الـ Auth
-    const companyId = req.body.companyId || req.companyId;
-    const userId = req.user.id;
+    // ✅ استخدام getCompanyId من الـ Helper
+    const companyId = getCompanyId(req);
+    const userId = req.user?.id;
 
     if (!companyId || !userId) {
       return res.status(401).json({
@@ -246,11 +340,19 @@ router.put('/:id/read', async (req, res) => {
       });
     }
 
+    if (!isValidCompanyId(companyId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
+        received: companyId
+      });
+    }
+
     const { id } = req.params;
     const notification = await Notification.findOne({
       _id: id,
-      companyId,
       userId,
+      companyId,
       deletedAt: null
     });
 
@@ -261,7 +363,14 @@ router.put('/:id/read', async (req, res) => {
       });
     }
 
-    await notification.markAsRead();
+    notification.readAt = new Date();
+    notification.status = 'read';
+    if (notification.delivery && notification.delivery.inApp) {
+      notification.delivery.inApp.readAt = new Date();
+      notification.delivery.inApp.status = 'read';
+    }
+    notification.updatedAt = new Date();
+    await notification.save();
 
     res.json({
       success: true,
@@ -281,14 +390,22 @@ router.put('/:id/read', async (req, res) => {
 // ===== PUT - وضع علامة كمقروء للكل =====
 router.put('/read-all', async (req, res) => {
   try {
-    // ✅ استخدام companyId من الـ Body أو من الـ Auth
-    const companyId = req.body.companyId || req.companyId;
+    // ✅ استخدام getCompanyId من الـ Helper
+    const companyId = getCompanyId(req);
     const userId = req.user?.id || req.body.userId;
 
     if (!companyId) {
       return res.status(400).json({
         success: false,
-        message: 'companyId مطلوب في الـ Body أو من الـ Auth'
+        message: 'companyId مطلوب في الـ Body أو الـ Header (x-company-id) أو من الـ Auth'
+      });
+    }
+
+    if (!isValidCompanyId(companyId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
+        received: companyId
       });
     }
 
@@ -299,7 +416,16 @@ router.put('/read-all', async (req, res) => {
       });
     }
 
-    await Notification.markAllAsRead(userId, companyId);
+    await Notification.updateMany(
+      { userId, companyId, readAt: null, deletedAt: null },
+      { 
+        $set: { 
+          readAt: new Date(), 
+          status: 'read',
+          updatedAt: new Date()
+        }
+      }
+    );
 
     res.json({
       success: true,
@@ -318,9 +444,9 @@ router.put('/read-all', async (req, res) => {
 // ===== PUT - تحديث حالة الإشعار =====
 router.put('/:id/status', async (req, res) => {
   try {
-    // ✅ استخدام companyId من الـ Body أو من الـ Auth
-    const companyId = req.body.companyId || req.companyId;
-    const userId = req.user.id;
+    // ✅ استخدام getCompanyId من الـ Helper
+    const companyId = getCompanyId(req);
+    const userId = req.user?.id;
 
     if (!companyId || !userId) {
       return res.status(401).json({
@@ -329,13 +455,21 @@ router.put('/:id/status', async (req, res) => {
       });
     }
 
+    if (!isValidCompanyId(companyId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
+        received: companyId
+      });
+    }
+
     const { id } = req.params;
     const { action } = req.body; // 'read', 'seen', 'dismiss'
 
     const notification = await Notification.findOne({
       _id: id,
-      companyId,
       userId,
+      companyId,
       deletedAt: null
     });
 
@@ -389,9 +523,9 @@ router.put('/:id/status', async (req, res) => {
 // ===== DELETE - حذف إشعار (Soft Delete) =====
 router.delete('/:id', async (req, res) => {
   try {
-    // ✅ استخدام companyId من الـ Body أو من الـ Auth
-    const companyId = req.body.companyId || req.companyId;
-    const userId = req.user.id;
+    // ✅ استخدام getCompanyId من الـ Helper
+    const companyId = getCompanyId(req);
+    const userId = req.user?.id;
 
     if (!companyId || !userId) {
       return res.status(401).json({
@@ -400,11 +534,19 @@ router.delete('/:id', async (req, res) => {
       });
     }
 
+    if (!isValidCompanyId(companyId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid company ID format. Must be ObjectId or start with "comp_"',
+        received: companyId
+      });
+    }
+
     const { id } = req.params;
     const notification = await Notification.findOne({
       _id: id,
-      companyId,
       userId,
+      companyId,
       deletedAt: null
     });
 
