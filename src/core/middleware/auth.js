@@ -1,6 +1,6 @@
 const firebaseService = require('../../config/firebase');
 const admin = require('firebase-admin');
-const jwt = require('jsonwebtoken'); // ✅ أضف هذا
+const jwt = require('jsonwebtoken');
 const { sendError, sendUnauthorized } = require('../utils/response');
 const logger = require('../utils/logger');
 const { UnauthorizedError, ForbiddenError } = require('./errorHandler');
@@ -256,7 +256,7 @@ const authMiddleware = async (req, res, next) => {
             logger.warn('Could not fetch user from MongoDB:', dbError.message);
         }
 
-        // لو المستخدم مش موجود في MongoDB، أنشئه تلقائياً
+        // ✅ لو المستخدم مش موجود في MongoDB، أنشئه تلقائياً
         if (!userFromDB) {
             try {
                 // ✅ توليد companyId مع التطبيع
@@ -278,7 +278,7 @@ const authMiddleware = async (req, res, next) => {
                 }
 
                 if (existingUser) {
-                    // لو موجود بالإيميل، حدّث الـ firebaseUid
+                    // ✅ لو موجود بالإيميل، حدّث الـ firebaseUid
                     existingUser.firebaseUid = firebaseUser.uid;
                     existingUser.displayName = firebaseUser.displayName || existingUser.displayName;
                     existingUser.photoURL = firebaseUser.photoURL || existingUser.photoURL;
@@ -296,7 +296,7 @@ const authMiddleware = async (req, res, next) => {
                         companyId: existingUser.companyId
                     });
                 } else {
-                    // إنشاء يوزر جديد
+                    // ✅ إنشاء يوزر جديد
                     const newUser = new User({
                         email: firebaseUser.email,
                         displayName: firebaseUser.displayName || firebaseUser.email || 'User',
@@ -326,6 +326,12 @@ const authMiddleware = async (req, res, next) => {
                 logger.error('❌ Failed to auto-create user:', createError.message);
                 return sendError(res, 500, 'Failed to create user profile. Please contact support.');
             }
+        }
+
+        // ✅ بعد الإنشاء أو الاسترجاع، تأكد من وجود userFromDB
+        if (!userFromDB) {
+            logger.error('❌ User not found after auto-create attempt');
+            return sendError(res, 500, 'User not found after auto-create attempt.');
         }
 
         // تحديد الـ Role والـ Permissions من MongoDB
